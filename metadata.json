@@ -1,6 +1,0 @@
-{
-  "name": "SliceCraft · 智能图像切割工作台",
-  "description": "High-precision multi-panel image splitter powered by Recursive XY-Cut, Contour Segmentation, and a Rust/PyO3 + OpenCV Python engine.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

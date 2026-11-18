@@ -1547,65 +1547,6 @@ fn borrow_image_bytes<'a>(
     Ok((w, h, ch, buf))
 }
 
-/// 使用递归 XY-Cut BSP 算法执行接缝检测，计算过程释放 Python GIL。
-#[pyfunction]
-#[pyo3(signature = (image, sensitivity=0.65, min_region_ratio=0.08, bleed_trim=2))]
-pub fn detect_recursive_xy_cut_rs(
-    py: Python<'_>,
-    image: PyReadonlyArray3<'_, u8>,
-    sensitivity: f32,
-    min_region_ratio: f32,
-    bleed_trim: u32,
-) -> PyResult<Vec<SplitBox>> {
-    let (w, h, ch, buf) = borrow_image_bytes(&image)?;
-    let slice: &[u8] = &buf;
-    let boxes = py.allow_threads(|| {
-        let (bg_rgb, is_trans, bg_unif) = estimate_border_bg(slice, w, h, ch);
-        xy_cut_core(
-            slice,
-            w,
-            h,
-            ch,
-            sensitivity,
-            min_region_ratio,
-            bleed_trim,
-            bg_rgb,
-            bg_unif > 0.72,
-            is_trans,
-        )
-    });
-    Ok(boxes)
-}
-
-/// 使用可分离形态学闭运算 + 并查集（DSU）提取离散对象轮廓包围盒，计算过程释放 GIL。
-#[pyfunction]
-#[pyo3(signature = (image, sensitivity=0.65, min_region_ratio=0.08, contour_gap_px=8))]
-pub fn detect_contours_rs(
-    py: Python<'_>,
-    image: PyReadonlyArray3<'_, u8>,
-    sensitivity: f32,
-    min_region_ratio: f32,
-    contour_gap_px: u32,
-) -> PyResult<Vec<SplitBox>> {
-    let (w, h, ch, buf) = borrow_image_bytes(&image)?;
-    let slice: &[u8] = &buf;
-    let boxes = py.allow_threads(|| {
-        let (bg_rgb, is_trans, _) = estimate_border_bg(slice, w, h, ch);
-        contours_core(
-            slice,
-            w,
-            h,
-            ch,
-            sensitivity,
-            min_region_ratio,
-            contour_gap_px,
-            bg_rgb,
-            is_trans,
-        )
-    });
-    Ok(boxes)
-}
-
 /// 统一布局检测入口：支持 `auto` / `xycut` / `contour` / `grid` 四种模式，零拷贝借用 NumPy 缓冲区并释放 GIL。
 #[pyfunction]
 #[pyo3(signature = (
@@ -1918,8 +1859,6 @@ pub fn batch_crop_to_memory_rs<'py>(
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SplitBox>()?;
-    m.add_function(wrap_pyfunction!(detect_recursive_xy_cut_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(detect_contours_rs, m)?)?;
     m.add_function(wrap_pyfunction!(detect_auto_rs, m)?)?;
     m.add_function(wrap_pyfunction!(batch_crop_and_save_rs, m)?)?;
     m.add_function(wrap_pyfunction!(batch_crop_to_memory_rs, m)?)?;

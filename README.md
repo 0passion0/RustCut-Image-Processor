@@ -145,7 +145,7 @@ BSP 划分出独立子区域后，执行两步精修：
 针对纯色或透明背景上散落的独立图标、贴纸、商品图集：
 1. 降采样至最大边 `≤ 720px` 网格（`scale = ceil(max(W, H) / 720)`）生成前景二值掩膜。
 2. **可分离 `O(s_w × s_h)` 双向扫描形态学闭运算**：水平 + 垂直两趟正反向游程扫描实现任意 `contour_gap_px` 闭运算合并，复杂度与核半径无关。
-3. **8-连通域提取**：Rust 端（[`src/lib.rs`](./src/lib.rs)）采用无递归**并查集（DSU + 路径减半）**，OpenCV 回退端采用 `cv2.connectedComponentsWithStats`。
+3. **8-连通域提取**：Rust 端（[`src/lib.rs`](./src/lib.rs)）采用无递归**并查集（DSU + 路径减半）**提取连通前景边界。
 4. **1:1 原图分辨率边缘收紧**：消除降采样带来的 `±scale` 像素量化误差，直接在 1:1 原始像素矩阵上收紧/微扩四边包围盒，实现 **0px 坐标误差**。
 
 ---
@@ -174,7 +174,7 @@ pip install smart-image-splitter
 pip install git+https://github.com/0passion0/RustCut-Image-Processor.git
 
 # 方式 3：通过 GitHub Releases 预编译 abi3 Wheel 安装（免本机 Rust 工具链）
-pip install https://github.com/0passion0/RustCut-Image-Processor/releases/download/v0.2.3/smart_image_splitter-0.2.3-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+pip install https://github.com/0passion0/RustCut-Image-Processor/releases/download/v0.2.4/smart_image_splitter-0.2.4-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
 ```
 
 > **预编译即装即用**：PyPI 已提供覆盖 Linux (`x86_64`/`aarch64`)、macOS (`Apple Silicon`/`Intel`) 与 Windows (`x64`) 的 `cp39-abi3` 预编译 Wheel，安装时直接包含原生 Rust 多核扩展，无需额外配置 C++/Rust 环境。
@@ -193,7 +193,8 @@ smart-split examples/sample_slides.png -o ./output_fixed --target-size 800x500 -
 ```
 
 ```python
-import cv2
+import numpy as np
+from PIL import Image
 from smart_splitter import SmartSplitter
 
 # 1. 标准智能切割（保留各子图最紧密边界）
@@ -207,7 +208,7 @@ uniform_splitter = SmartSplitter(
     uniform_size=True,       # 自动对齐到所有切片的最大宽高；也可用 target_size=(512, 512) 显式指定
     uniform_mode="pad",      # 可选 "pad"（居中填充背景）| "resize"（缩放）| "crop"（原图同框裁剪）
 )
-img = cv2.imread("examples/sample_slides.png")
+img = np.asarray(Image.open("examples/sample_slides.png").convert("RGB"))
 res, png_blobs = uniform_splitter.split_to_bytes(img, fmt="png")
 
 # 3. 可选机器学习分割回调（可接入 SAM 2 / YOLO / ONNX）
@@ -234,13 +235,13 @@ ml_splitter = SmartSplitter(ml_segmenter=my_sam2_box_predictor)
 
 ### 返回结构 `SplitResult` & `SplitBox`
 
-- **`SplitResult`**：`image_width`, `image_height`, `detected_mode`, `backend`（`"rust-rayon"` / `"opencv-numpy"` / `"ml-hook"`）, `elapsed_ms`, `boxes`
+- **`SplitResult`**：`image_width`, `image_height`, `detected_mode`, `backend`（`"rust-rayon"` / `"ml-hook"`）, `elapsed_ms`, `boxes`
 - **`SplitBox`**：`index`（1-based）, `row`, `col`, `x`, `y`, `width`, `height`, `confidence`, `strategy`, `trimmed_edges`（`(top, right, bottom, left)`）
 
 ### 本地开发与测试
 
 ```bash
-pip install setuptools wheel setuptools-rust maturin pytest numpy opencv-python-headless pillow
+pip install setuptools wheel setuptools-rust maturin pytest numpy pillow
 maturin develop --release
 pytest -v tests/
 cargo clippy --all-targets -- -D warnings

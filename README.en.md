@@ -100,8 +100,8 @@ pip install smart-image-splitter
 # Option 2: Install directly from GitHub source
 pip install git+https://github.com/0passion0/RustCut-Image-Processor.git
 
-# Option 3: Install prebuilt abi3 wheel from GitHub Releases (example: v0.2.3 Linux x86_64)
-pip install https://github.com/0passion0/RustCut-Image-Processor/releases/download/v0.2.3/smart_image_splitter-0.2.3-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+# Option 3: Install prebuilt abi3 wheel from GitHub Releases (example: v0.2.4 Linux x86_64)
+pip install https://github.com/0passion0/RustCut-Image-Processor/releases/download/v0.2.4/smart_image_splitter-0.2.4-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
 ```
 
 ```bash
@@ -116,7 +116,8 @@ smart-split examples/sample_slides.png -o ./output_fixed --target-size 800x500 -
 ```
 
 ```python
-import cv2
+import numpy as np
+from PIL import Image
 from smart_splitter import SmartSplitter
 
 splitter = SmartSplitter(mode="auto", sensitivity=0.65, bleed_trim=2)
@@ -131,7 +132,7 @@ uniform_splitter = SmartSplitter(
     uniform_size=True,       # or target_size=(512, 512)
     uniform_mode="pad",      # "pad" | "resize" | "crop"
 )
-img = cv2.imread("examples/sample_slides.png")
+img = np.asarray(Image.open("examples/sample_slides.png").convert("RGB"))
 result, png_blobs = uniform_splitter.split_to_bytes(img, fmt="png")
 
 # 3. Optional ML segmentation callback (SAM 2 / YOLO / ONNX)
@@ -155,7 +156,7 @@ ml_splitter = SmartSplitter(ml_segmenter=my_sam2_box_predictor)
 | `ml_segmenter` | `None` | Optional callback returning `(x, y, w, h)` bounding boxes |
 
 ```bash
-pip install setuptools wheel setuptools-rust maturin pytest numpy opencv-python-headless pillow
+pip install setuptools wheel setuptools-rust maturin pytest numpy pillow
 maturin develop --release
 pytest -v tests/
 cargo clippy --all-targets -- -D warnings
@@ -169,7 +170,7 @@ cargo clippy --all-targets -- -D warnings
 .
 ├── Cargo.toml                        # Rust PyO3 + Rayon crate config (abi3-py39 + Release LTO)
 ├── pyproject.toml                    # PEP 517 + setuptools / maturin config
-├── setup.py / MANIFEST.in            # Adaptive build (OpenCV fallback when cargo is absent)
+├── setup.py / MANIFEST.in            # Native Rust PyO3 extension build config
 ├── LICENSE / CONTRIBUTING.md         # Apache-2.0 OR MIT dual license & guidelines
 ├── README.md / README.en.md          # Chinese (default) / English docs
 ├── .github/workflows/                # CI & multi-platform abi3 wheel / PyPI release workflows

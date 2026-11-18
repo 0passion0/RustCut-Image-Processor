@@ -4,16 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smart-image-splitter"
-version = "0.2.3"
-description = "High-performance hybrid Rust (PyO3 + Rayon) and OpenCV image splitter with XY-Cut BSP, gutter collapsing, bleed decontamination, and contour extraction."
+version = "0.2.4"
+description = "High-performance pure-Rust (PyO3 + Rayon) image splitter with XY-Cut BSP, gutter collapsing, bleed decontamination, uniform output sizing, and contour extraction."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0 OR MIT"
 authors = [{ name = "0passion0" }, { name = "SliceCraft Contributors" }]
-keywords = ["image-splitting", "computer-vision", "rust", "pyo3", "opencv", "xy-cut"]
+keywords = ["image-splitting", "computer-vision", "rust", "pyo3", "xy-cut"]
 dependencies = [
   "numpy>=1.24",
-  "opencv-python-headless>=4.8",
   "pillow>=10.0",
 ]
 

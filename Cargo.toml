@@ -1,6 +1,6 @@
 [package]
 name = "smart-image-splitter"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 description = "High-performance Rust core (PyO3 + Rayon + image) for multi-strategy image splitting and seam bleed removal"
 license = "Apache-2.0 OR MIT"

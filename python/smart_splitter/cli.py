@@ -52,7 +52,7 @@ def main() -> None:
     # 第一步：定义并解析 CLI 参数（包含输入路径、分割模式、灵敏度、去杂边像素、统一长宽配置及网格行列数）
     parser = argparse.ArgumentParser(
         prog="smart-split",
-        description="基于 Rust (PyO3 + Rayon) 与 OpenCV 的高精度复合图像智能切割命令行工具。",
+        description="基于纯 Rust (PyO3 + Rayon) 的高精度复合图像智能切割命令行工具。",
     )
     parser.add_argument("input", type=Path, help="待切割的单张图像文件路径或包含图像的目录路径")
     parser.add_argument("-o", "--output", type=Path, default=Path("./output_slices"), help="切片输出目录")
@@ -105,7 +105,7 @@ def main() -> None:
     )
 
     # 第四步：逐文件执行切割并在控制台打印当前加速后端与耗时摘要
-    print(f"SmartSplitter v0.2.3 | Rust PyO3 Core: {'ACTIVE' if HAS_RUST_CORE else 'INACTIVE'}")
+    print(f"SmartSplitter v0.2.4 | Rust PyO3 Core: {'ACTIVE' if HAS_RUST_CORE else 'INACTIVE'}")
     for img_path in inputs:
         sub_out = args.output / img_path.stem if args.input.is_dir() else args.output
         result, saved = splitter.split_file(
