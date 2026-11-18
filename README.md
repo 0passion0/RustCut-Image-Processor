@@ -7,9 +7,9 @@
 [![CI](https://github.com/0passion0/RustCut-Image-Processor/actions/workflows/ci.yml/badge.svg)](https://github.com/0passion0/RustCut-Image-Processor/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-green.svg)](./LICENSE)
 
-**smart-image-splitter** 是一个可直接通过 `pip install` 安装的像素级复合图像自动切割 Python 工具包，底层由 **原生 Rust (`PyO3` + `Rayon`) 并行计算内核** 与 **全特性对齐的向量化 OpenCV / NumPy 回退引擎** 驱动。
+**smart-image-splitter** 是一个可直接通过 `pip install` 安装的像素级复合图像自动切割 Python 工具包，所有核心算法与并发裁剪编码均**直接由原生 Rust (`PyO3` + `Rayon` + `image`) 并行计算内核执行**。
 
-系统专为解决“传统 `W/N × H/M` 等分网格切歪、串色、漏切”等痛点而设计，能够高精度处理**错位排版 PPT 组图**、**非对称 Bento 拼图**、**白边隔离卡片集**、**纯色/透明背景离散图标与精灵图**，并支持通过回调接入 **SAM 2 / YOLO / ONNX** 模型处理自然重叠场景。
+系统专为解决“传统 `W/N × H/M` 等分网格切歪、串色、漏切”等痛点而设计，能够高精度处理**错位排版 PPT 组图**、**非对称 Bento 拼图**、**白边隔离卡片集**、**纯色/透明背景离散图标与精灵图**，并支持**全切片强制统一长宽**（居中补边 / 缩放 / 原图同框裁剪，原生 Rust 并发执行）以及通过回调接入 **SAM 2 / YOLO / ONNX** 模型处理自然重叠场景。
 
 ---
 
@@ -51,11 +51,17 @@
   │
   ├─► 若注入 ml_segmenter 回调 ──► 调度外部 SAM 2 / YOLO / ONNX 掩膜框 ("ml-hook")
   │
-  └─► 默认调度原生 Rust 核心 (`smart_splitter._core`，无扩展时无缝切换 OpenCV/NumPy 内核)
+  └─► 调度原生 Rust 核心 (`smart_splitter._core`，释放 GIL + Rayon 并行执行)
         ├─ mode = "grid"    ──► 均匀行列网格 + 可选固定留白扣除
         ├─ mode = "contour" ──► 可分离形态学闭运算 + 并查集 8-连通域 + 1:1 边缘收紧
         ├─ mode = "xycut"   ──► 递归分层 XY-Cut BSP + 同级网格线传播 + ±8px 吸附 + 去杂边
         └─ mode = "auto"    ──► 自适应判定：统一纯色/透明背景且分散对象占比 < 65% 时走 contour，否则走 xycut
+              │
+              ▼ [可选：uniform_size=True / target_size=(W, H)]
+        └─ 统一长宽后处理（Rust Rayon 多线程执行）
+              ├─ uniform_mode = "pad"    ──► 按原图主背景色/透明底居中填充至统一宽高（默认，不裁切不变形）
+              ├─ uniform_mode = "resize" ──► 直接缩放所有切片至统一宽高
+              └─ uniform_mode = "crop"   ──► 在检测阶段直接于原图上按相同宽高裁剪框居中对齐
 ```
 
 | 模式 | 典型适用场景 | 核心算法策略 |
@@ -71,70 +77,76 @@
 
 ### 3.1 多尺度方向阶跃梯度 + 1px 细线脉冲能量剖面
 
-对于任意候选扫描线位置 $p$（例如水平扫描行 $y$，沿正交方向采样 $u \in [x_0, x_1)$），真实的版面分割边界必然表现为以下两类信号之一：
+对于任意候选扫描线位置 `p`（例如水平扫描行 `y`，沿正交方向采样 `u ∈ [x₀, x₁)`），真实的版面分割边界必然表现为以下两类信号之一：
 1. **阶跃跳变边（Step Edge）**：相邻子图底色或边缘存在色差；
 2. **1px 细线脉冲（Hairline Impulse）**：即使上下两侧同为纯白背景，其间的 `1px` 细分隔线或投影也会产生显著的二阶拉普拉斯峰值。
 
-我们在 RGB $L_1$ 空间同时计算两项方向能量响应：
+我们在 RGB L₁ 空间同时计算两项方向能量响应：
 
-$$E_{\text{step}}(p, u) = \|I(p, u) - I(p+1, u)\|_1$$
+```text
+E_step(p, u) = || I(p, u) - I(p + 1, u) ||₁
+E_line(p, u) = 0.5 × || 2·I(p, u) - I(p - 1, u) - I(p + 1, u) ||₁
+E(p, u)      = E_step(p, u) + E_line(p, u)
+```
 
-$$E_{\text{line}}(p, u) = \frac{1}{2} \|2I(p, u) - I(p-1, u) - I(p+1, u)\|_1$$
-
-局部综合边缘能量定义为：
-
-$$E(p, u) = E_{\text{step}}(p, u) + E_{\text{line}}(p, u)$$
-
-**理论意义**：当深蓝卡片遇上纯白卡片时，$E_{\text{step}} \approx 600$ 占主导；当两张白底 PPT 仅靠 `1px` 浅灰线（每通道差 $\Delta = 15$）分隔时，$E_{\text{step}} \approx 45$ 且 $E_{\text{line}} \approx 45$ 形成双重叠加，信噪比远高于单一差分算子。
+**理论意义**：当深蓝卡片遇上纯白卡片时，`E_step ≈ 600` 占主导；当两张白底 PPT 仅靠 `1px` 浅灰线（每通道差 `Δ = 15`）分隔时，`E_step ≈ 45` 且 `E_line ≈ 45` 形成双重叠加，信噪比远高于单一差分算子。
 
 ### 3.2 非线性覆盖率加权与切向平滑度惩罚
 
 面板内部的文字行、表格框线、折线图坐标轴同样具有局部高梯度——**如何保证绝对不把图表或标题从中间腰斩？**
 
-1. **$\pm 2\text{px}$ 邻域覆盖率 $C(p)$**：
-   受抗锯齿与 JPEG 压缩影响，物理边界可能产生 $\pm 1\text{–}2\text{px}$ 抖动。只要 $[p-2, p+2]$ 局部窗口内存在满足 $E(r, u) > 16$ 的响应，即记该采样列处于激活态：
-   $$C(p) = \frac{1}{N} \sum_{u=1}^{N} \mathbb{I}\!\left[\max_{r \in [p-2, p+2]} E(r, u) > 16\right]$$
-   内部表格横线通常只覆盖局部宽度的 $30\%\text{–}60\%$，而真实跨栏分隔线的覆盖率 $C(p) \in [0.85, 1.00]$。引入非线性幂次权重 $C(p)^{2.4}$ 后，局部短线会被强力压制（$0.4^{2.4} = 0.11$ vs. $0.95^{2.4} = 0.88$）。
+1. **±2px 邻域覆盖率 C(p)**：
+   受抗锯齿与 JPEG 压缩影响，物理边界可能产生 `±1–2px` 抖动。只要 `[p - 2, p + 2]` 局部窗口内存在满足 `E(r, u) > 16` 的响应，即记该采样列处于激活态：
+   ```text
+   C(p) = (1 / N) × Σ_u I[ max_{r ∈ [p-2, p+2]} E(r, u) > 16 ]
+   ```
+   内部表格横线通常只覆盖局部宽度的 `30%–60%`，而真实跨栏分隔线的覆盖率 `C(p) ∈ [0.85, 1.00]`。引入非线性幂次权重 `C(p)^2.4` 后，局部短线会被强力压制（`0.4^2.4 = 0.11` 对比 `0.95^2.4 = 0.88`）。
 
-2. **切向平滑度惩罚 $S_{\text{tan}}(p)$**：
+2. **切向平滑度惩罚 S_tan(p)**：
    真实子图边框沿切线方向颜色高度连续，而穿过文字或图标的扫描线在切线方向高频剧烈震荡：
-   $$S_{\text{tan}}(p) = \frac{1}{N-1} \sum_{u=2}^{N} \left| L(p, u) - L(p, u-1) \right|, \quad L = R + G + B$$
-   算法取 $[p-1, p, p+1]$ 中的最小平滑度 $S_{\min}(p)$，避免高纹理卡片贴近纯色卡片时边缘被误伤惩罚。
+   ```text
+   S_tan(p) = (1 / (N - 1)) × Σ_{u=2..N} | L(p, u) - L(p, u - 1) |,   其中 L = R + G + B
+   ```
+   算法取 `[p - 1, p, p + 1]` 中的最小平滑度 `S_min(p)`，避免高纹理卡片贴近纯色卡片时边缘被误伤惩罚。
 
 3. **综合分割评分公式**：
-   $$\text{Score}_{\text{seam}}(p) = \frac{\left(\bar{E}_{\text{step}}(p) + 0.7\,\bar{E}_{\text{line}}(p)\right) \cdot C(p)^{2.4}}{1 + 0.12 \cdot S_{\min}(p)}$$
-   候选峰值通过**一维非极大值抑制（NMS）**提取，最小峰间距为 $d_{\min} = \max(24, \text{min\_region\_ratio} \cdot \min(W, H))$，并要求 $C(p) \ge 0.72$。
+   ```text
+   Score_seam(p) = [ (mean(E_step(p)) + 0.7 × mean(E_line(p))) × C(p)^2.4 ] / (1 + 0.12 × S_min(p))
+   ```
+   候选峰值通过**一维非极大值抑制（NMS）**提取，最小峰间距为 `d_min = max(24, min_region_ratio × min(W, H))`，并要求 `C(p) ≥ 0.72`。
 
 ### 3.3 留白沟壑谷值检测与连续区间中点坍缩
 
 针对带有**宽纯色/透明留白间距**的卡片图（例如各卡片之间留有 `40px` 白色缝隙）：
-1. 基于图像四周边缘像素构建 $8\times 8\times 8$ 量化直方图估计主背景色 $\mathbf{b}$ 与边缘一致性 $U_{\text{border}}$（透明图直接检测 $\alpha < 32$ 比例）。
-2. 当 $U_{\text{border}} > 0.72$ 时，若某一内部分割带满足背景匹配率 $> 95\%$、切向抖动 $S_{\text{tan}} < 2.5$ 且**两侧均存在前景内容**，则赋予留白谷值分：
-   $$\text{Score}_{\text{gutter}}(p) = \frac{110}{1 + S_{\text{tan}}(p)}$$
-3. **连续沟壑区间坍缩**：宽 `40px` 的白色过道会产生 40 条相邻高分线。将连续沟壑区间 $[i, j]$ 坍缩到唯一几何中点 $\lfloor (i + j)/2 \rfloor$，彻底杜绝“同一条宽白边被切成两条线并产生空白废图”的问题；叶子区域前景占比低于 $3\%$ 的纯背景块自动剔除。
+1. 基于图像四周边缘像素构建 `8 × 8 × 8` 量化直方图估计主背景色 `b` 与边缘一致性 `U_border`（透明图直接检测 `Alpha < 32` 比例）。
+2. 当 `U_border > 0.72` 时，若某一内部分割带满足背景匹配率 `> 95%`、切向抖动 `S_tan < 2.5` 且**两侧均存在前景内容**，则赋予留白谷值分：
+   ```text
+   Score_gutter(p) = 110 / (1 + S_tan(p))
+   ```
+3. **连续沟壑区间坍缩**：宽 `40px` 的白色过道会产生 40 条相邻高分线。将连续沟壑区间 `[i, j]` 坍缩到唯一几何中点 `⌊(i + j) / 2⌋`，彻底杜绝“同一条宽白边被切成两条线并产生空白废图”的问题；叶子区域前景占比低于 `3%` 的纯背景块自动剔除。
 
 ### 3.4 递归分层 XY-Cut BSP 与同级网格线传播
 
-1. 在当前区域 $[x_0, y_0, x_1, y_1]$ 内同时评估 H/V 两个方向的最优峰值，优先沿强分割轴（$\max \text{Score}_H \ge 0.72 \cdot \max \text{Score}_V$）切分为若干条带。
-2. **递归独立求解**：每个子条带独立重新统计次级边界，从而天然适应上两行 `x=1824` 与第三行 `x=1812` 之间 `12px` 的错位拼图以及非对称 Bento 布局。
+1. 在当前区域 `[x₀, y₀, x₁, y₁]` 内同时评估 H/V 两个方向的最优峰值，优先沿强分割轴（`max(Score_H) ≥ 0.72 × max(Score_V)`）切分为若干条带。
+2. **递归独立求解**：每个子条带独立重新统计次级边界，从而天然适应上两行 `x = 1824` 与第三行 `x = 1812` 之间 `12px` 的错位拼图以及非对称 Bento 布局。
 3. **同级网格线传播（Sibling Grid-Line Propagation）**：
-   若相邻兄弟区域已在 $p_{\text{cut}}$ 切分，而跨过该线段的低对比度区域（例如两张无缝贴合的白底幻灯片）主阈值未触发，则在 $p_{\text{cut}} \pm 12\text{px}$ 窄窗口内启用高覆盖率低阈值精搜（$\text{cov} \ge 0.78$、$\bar{E}_{\text{raw}} \ge 10$、$S_{\text{tan}} < 2.2$），100% 召回微弱阴影分割线且零误切。
+   若相邻兄弟区域已在 `p_cut` 切分，而跨过该线段的低对比度区域（例如两张无缝贴合的白底幻灯片）主阈值未触发，则在 `p_cut ± 12px` 窄窗口内启用高覆盖率低阈值精搜（`cov ≥ 0.78`、`mean(E_raw) ≥ 10`、`S_tan < 2.2`），100% 召回微弱阴影分割线且零误切。
 
 ### 3.5 单面板 ±8px 局部边缘吸附与抗锯齿去杂边
 
 BSP 划分出独立子区域后，执行两步精修：
-1. **±8px 局部边界吸附**：针对单个子图的上下左右四条内边在 $\pm 8\text{px}$ 内独立对齐至本区域真实像素跃迁点。
+1. **±8px 局部边界吸附**：针对单个子图的上下左右四条内边在 `±8px` 内独立对齐至本区域真实像素跃迁点。
 2. **外缘背景裁剪与防串色去杂边（`bleed_trim`）**：
-   - 先自动剥离四边残留的整行/整列统一背景（$> 94\%$ 匹配率）。
-   - 再沿内部切割边取最外侧 `0..bleed_trim`（默认 `2px`）像素，与内侧参考行/列 `ref = edge ± (bleed_trim + 2)` 计算平均 $L_1$ 色差。当色差 $> 20$ 时剥离该过渡像素或 `1px` 灰线——做到**深色卡片不带白边、白底卡片不带灰线黑边**。
+   - 先自动剥离四边残留的整行/整列统一背景（`> 94%` 匹配率）。
+   - 再沿内部切割边取最外侧 `0..bleed_trim`（默认 `2px`）像素，与内侧参考行/列 `ref = edge ± (bleed_trim + 2)` 计算平均 L₁ 色差。当色差 `> 20` 时剥离该过渡像素或 `1px` 灰线——做到**深色卡片不带白边、白底卡片不带灰线黑边**。
 
 ### 3.6 线性时间可分离膨胀 + Union-Find 轮廓提取与 1:1 边缘收紧
 
 针对纯色或透明背景上散落的独立图标、贴纸、商品图集：
-1. 降采样至最大边 $\le 720\text{px}$ 网格（`scale = ceil(max(W, H) / 720)`）生成前景二值掩膜。
-2. **可分离 $O(s_w \cdot s_h)$ 双向扫描形态学闭运算**：水平 + 垂直两趟正反向游程扫描实现任意 `contour_gap_px` 闭运算合并，复杂度与核半径无关。
+1. 降采样至最大边 `≤ 720px` 网格（`scale = ceil(max(W, H) / 720)`）生成前景二值掩膜。
+2. **可分离 `O(s_w × s_h)` 双向扫描形态学闭运算**：水平 + 垂直两趟正反向游程扫描实现任意 `contour_gap_px` 闭运算合并，复杂度与核半径无关。
 3. **8-连通域提取**：Rust 端（[`src/lib.rs`](./src/lib.rs)）采用无递归**并查集（DSU + 路径减半）**，OpenCV 回退端采用 `cv2.connectedComponentsWithStats`。
-4. **1:1 原图分辨率边缘收紧**：消除降采样带来的 $\pm \text{scale}$ 像素量化误差，直接在 1:1 原始像素矩阵上收紧/微扩四边包围盒，实现 **0px 坐标误差**。
+4. **1:1 原图分辨率边缘收紧**：消除降采样带来的 `±scale` 像素量化误差，直接在 1:1 原始像素矩阵上收紧/微扩四边包围盒，实现 **0px 坐标误差**。
 
 ---
 
@@ -143,10 +155,10 @@ BSP 划分出独立子区域后，执行两步精修：
 | 工程优化项 | 解决的性能/精度瓶颈 | 具体实现方案 |
 |---|---|---|
 | **1. 行主序 Rayon 并行扫描** | 传统列剖面 `for x { for y }` 每次跨行跳转 `W * C` 字节，导致严重 CPU L1/L2 Cache Miss | 在 Rust 端改为 `ys.par_iter().fold().reduce()` 行主序并行归约，所有内存访问均命中连续缓存行 |
-| **2. 单遍邻域激活追踪** | 每个递归子区域分配二维 `O(span × 200)` 能量矩阵造成大量内存读写 | 用一维单调游标实现 $\pm 2\text{px}$ 邻域最大值追踪，消除二维能量矩阵分配 |
-| **3. 正交 200 采样 + 主轴 1px 步进** | 主轴跳行采样会漏检位于奇数坐标（如 `y=531, 1043`）的 `1px` 细线 | 严格保持主扫描轴 **`1px` 逐行/逐列扫描**不漏线，仅对正交方向按 $\approx 200$ 个点步进采样 |
+| **2. 单遍邻域激活追踪** | 每个递归子区域分配二维 `O(span × 200)` 能量矩阵造成大量内存读写 | 用一维单调游标实现 `±2px` 邻域最大值追踪，消除二维能量矩阵分配 |
+| **3. 正交 200 采样 + 主轴 1px 步进** | 主轴跳行采样会漏检位于奇数坐标（如 `y=531, 1043`）的 `1px` 细线 | 严格保持主扫描轴 **`1px` 逐行/逐列扫描**不漏线，仅对正交方向按约 `200` 个点步进采样 |
 | **4. 零拷贝 NumPy 借用与释放 GIL** | 大图跨 FFI 内存拷贝与阻塞 Python 主线程 | Rust 端对 C-contiguous NumPy 数组通过 `Cow<[u8]>` **零拷贝借用**，并通过 `py.allow_threads(...)` 释放 Python GIL |
-| **5. 内存级并发裁剪编码** | 服务端接口或深度学习 DataLoader 写磁盘产生高 I/O 开销 | `batch_crop_to_memory_rs` 在内存中通过 Rayon 多线程并发编码裁剪字节流，零磁盘临时文件 |
+| **5. 内存级并发裁剪与尺寸对齐** | 服务端接口或深度学习 DataLoader 写磁盘或逐张 Python 补边缩放开销高 | `batch_crop_to_memory_rs` / `batch_crop_and_save_rs` 在 Rust Rayon 多线程内直接完成 `pad` / `resize` / 编码 |
 
 ---
 
@@ -162,33 +174,41 @@ pip install smart-image-splitter
 pip install git+https://github.com/0passion0/RustCut-Image-Processor.git
 
 # 方式 3：通过 GitHub Releases 预编译 abi3 Wheel 安装（免本机 Rust 工具链）
-pip install https://github.com/0passion0/RustCut-Image-Processor/releases/download/v0.2.2/smart_image_splitter-0.2.2-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+pip install https://github.com/0passion0/RustCut-Image-Processor/releases/download/v0.2.3/smart_image_splitter-0.2.3-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
 ```
 
-> **零配置双后端自适应**：
-> - 从 PyPI 安装或本机已配备 `cargo` 时，自动启用原生多核加速扩展 `smart_splitter._core`（`PyO3` + `Rayon`）；
-> - 目标环境仅安装纯 Python 依赖且无 `cargo` 从源码安装时，`setup.py` 会自动跳过编译并无缝切换至全特性对齐的 OpenCV / NumPy 内核。
+> **预编译即装即用**：PyPI 已提供覆盖 Linux (`x86_64`/`aarch64`)、macOS (`Apple Silicon`/`Intel`) 与 Windows (`x64`) 的 `cp39-abi3` 预编译 Wheel，安装时直接包含原生 Rust 多核扩展，无需额外配置 C++/Rust 环境。
 
 ### 命令行与 Python API 示例
 
 ```bash
 # 命令行批量切割单图或目录
 smart-split examples/sample_slides.png -o ./output_slices --mode auto --bleed-trim 2 --format png
+
+# 强制所有输出切片为统一相同长宽（默认居中背景填充，不裁切内容）
+smart-split examples/sample_slides.png -o ./output_uniform --uniform-size --uniform-mode pad
+
+# 或指定固定目标宽高，并在原图上按相同大小框裁剪（不缩放不补边）
+smart-split examples/sample_slides.png -o ./output_fixed --target-size 800x500 --uniform-mode crop
 ```
 
 ```python
 import cv2
 from smart_splitter import SmartSplitter
 
+# 1. 标准智能切割（保留各子图最紧密边界）
 splitter = SmartSplitter(mode="auto", sensitivity=0.65, bleed_trim=2)
-
-# 1. 文件级直接切割保存
 result, paths = splitter.split_file("examples/sample_slides.png", "output_slices/")
 print(f"后端 {result.backend} ({result.detected_mode}) 在 {result.elapsed_ms:.1f}ms 内输出 {len(paths)} 张切片")
 
-# 2. 零磁盘内存字节流输出（适用于 FastAPI / PyTorch 数据流水线）
+# 2. 强制所有切片统一为相同宽高（Rust Rayon 并发居中填充/缩放/原图同框裁剪）
+uniform_splitter = SmartSplitter(
+    mode="auto",
+    uniform_size=True,       # 自动对齐到所有切片的最大宽高；也可用 target_size=(512, 512) 显式指定
+    uniform_mode="pad",      # 可选 "pad"（居中填充背景）| "resize"（缩放）| "crop"（原图同框裁剪）
+)
 img = cv2.imread("examples/sample_slides.png")
-result, png_blobs = splitter.split_to_bytes(img, fmt="png")
+res, png_blobs = uniform_splitter.split_to_bytes(img, fmt="png")
 
 # 3. 可选机器学习分割回调（可接入 SAM 2 / YOLO / ONNX）
 ml_splitter = SmartSplitter(ml_segmenter=my_sam2_box_predictor)
@@ -207,6 +227,9 @@ ml_splitter = SmartSplitter(ml_segmenter=my_sam2_box_predictor)
 | `min_region_ratio` | `0.08` | 最小子图尺寸占图像短边比例下限（裁剪至 `[0.03, 0.35]`） |
 | `bleed_trim` | `2` | 内部接缝抗锯齿去杂边最大剥离像素数（px） |
 | `contour_gap_px` | `8` | `contour` 模式下形态学闭运算弥合组件间隙的半径（px） |
+| `uniform_size` | `False` | 是否强制所有切片输出相同宽高（自动取全切片最大宽高） |
+| `target_size` | `None` | 可选显式固定目标宽高 `(width, height)`；传入后自动启用统一尺寸 |
+| `uniform_mode` | `"pad"` | 统一长宽策略：`"pad"`（居中补背景）/ `"resize"`（缩放）/ `"crop"`（原图框对齐） |
 | `ml_segmenter` | `None` | 可选回调 `Callable[[np.ndarray], List[Tuple[int, int, int, int]]]`，返回 `(x, y, w, h)` 列表 |
 
 ### 返回结构 `SplitResult` & `SplitBox`
@@ -231,19 +254,19 @@ cargo clippy --all-targets -- -D warnings
 .
 ├── Cargo.toml                        # Rust PyO3 + Rayon Crate 配置（含 abi3-py39 与 Release LTO）
 ├── pyproject.toml                    # PEP 517 + setuptools / maturin 构建配置
-├── setup.py                          # 自适应 Rust 编译（无 cargo 时无感回退纯 Python）
+├── setup.py                          # Rust PyO3 扩展构建配置
 ├── MANIFEST.in                       # 源码分发清单
 ├── LICENSE / CONTRIBUTING.md         # Apache-2.0 OR MIT 双重协议与贡献指南
 ├── README.md / README.en.md          # 中文（默认）/ 英文双语文档
 ├── .github/workflows/
 │   ├── ci.yml                        # 根目录 pip install + Cargo + maturin + pytest 自动化测试
 │   └── release-wheels.yml            # Linux(x64/ARM64) / macOS(Intel/M系列) / Windows PyPI 自动发布
-├── src/lib.rs                        # 原生 Rust 核心：XY-Cut BSP、并查集轮廓提取与内存并发裁剪
+├── src/lib.rs                        # 原生 Rust 核心：XY-Cut BSP、并查集轮廓提取、统一长宽与并发编码
 ├── python/smart_splitter/
 │   ├── __init__.py                   # 对外导出 (SmartSplitter, SplitBox, SplitResult)
-│   ├── engine.py                     # Rust / 全特性对齐 OpenCV 双引擎与 ML 钩子
+│   ├── engine.py                     # 纯 Rust 引擎封装、统一长宽调度与 ML 钩子
 │   └── cli.py                        # `smart-split` 命令行入口
-├── tests/test_splitter.py            # pytest 单元测试（XY-Cut、留白沟壑、去杂边、轮廓提取）
+├── tests/test_splitter.py            # pytest 单元测试（XY-Cut、留白沟壑、去杂边、轮廓、统一长宽）
 └── examples/sample_slides.png        # 2848x1600 九宫格真实测试样本图
 ```
 

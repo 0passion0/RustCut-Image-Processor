@@ -6,15 +6,16 @@
 //! ## 核心算法模块
 //!
 //! - **方向阶跃 + 1px 细线能量剖面**：精准识别错位接缝与白底幻灯片之间的微弱阴影分割线。
-//! - **递归 XY-Cut BSP 与同级网格线传播**：在 $\pm 12\text{px}$ 窗口内找回跨栏低对比度微弱边界。
+//! - **递归 XY-Cut BSP 与同级网格线传播**：在 `±12px` 窗口内找回跨栏低对比度微弱边界。
 //! - **留白沟壑检测与中点坍缩**：自动剔除纯白/透明过道废图并剥离外缘抗锯齿杂边（`bleed_trim`）。
-//! - **线性时间可分离形态学闭运算 + 并查集（DSU）**：以 $O(N)$ 复杂度提取 8-连通离散物体轮廓并执行 1:1 边缘收紧。
+//! - **线性时间可分离形态学闭运算 + 并查集（DSU）**：以 `O(N)` 复杂度提取 8-连通离散物体轮廓并执行 1:1 边缘收紧。
 //!
 //! - **开源协议**：`Apache-2.0 OR MIT`
 
 #![allow(clippy::useless_conversion, clippy::too_many_arguments)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+use image::imageops::FilterType;
 use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
 use numpy::PyReadonlyArray3;
 use pyo3::exceptions::PyValueError;
@@ -1607,7 +1608,20 @@ pub fn detect_contours_rs(
 
 /// 统一布局检测入口：支持 `auto` / `xycut` / `contour` / `grid` 四种模式，零拷贝借用 NumPy 缓冲区并释放 GIL。
 #[pyfunction]
-#[pyo3(signature = (image, mode="auto", sensitivity=0.65, min_region_ratio=0.08, bleed_trim=2, contour_gap_px=8, rows=3, cols=3, gutter_px=0))]
+#[pyo3(signature = (
+    image,
+    mode="auto",
+    sensitivity=0.65,
+    min_region_ratio=0.08,
+    bleed_trim=2,
+    contour_gap_px=8,
+    rows=3,
+    cols=3,
+    gutter_px=0,
+    uniform_size=false,
+    target_size=None,
+    uniform_mode="pad"
+))]
 pub fn detect_auto_rs(
     py: Python<'_>,
     image: PyReadonlyArray3<'_, u8>,
@@ -1619,12 +1633,29 @@ pub fn detect_auto_rs(
     rows: u32,
     cols: u32,
     gutter_px: u32,
+    uniform_size: bool,
+    target_size: Option<(u32, u32)>,
+    uniform_mode: &str,
 ) -> PyResult<(String, Vec<SplitBox>)> {
+    let u_mode = uniform_mode.to_lowercase();
+    if u_mode != "pad" && u_mode != "resize" && u_mode != "crop" {
+        return Err(PyValueError::new_err(format!(
+            "uniform_mode must be 'pad', 'resize', or 'crop', got '{uniform_mode}'"
+        )));
+    }
+    if let Some((tw, th)) = target_size {
+        if tw == 0 || th == 0 {
+            return Err(PyValueError::new_err(
+                "target_size width and height must be positive",
+            ));
+        }
+    }
+
     let (w, h, ch, buf) = borrow_image_bytes(&image)?;
     let slice: &[u8] = &buf;
     let mode_lower = mode.to_lowercase();
 
-    let result = py.allow_threads(|| -> (String, Vec<SplitBox>) {
+    let mut result = py.allow_threads(|| -> (String, Vec<SplitBox>) {
         if mode_lower == "grid" {
             return (
                 "grid".into(),
@@ -1692,12 +1723,73 @@ pub fn detect_auto_rs(
         ("xycut".into(), xy_boxes)
     });
 
+    if u_mode == "crop" && (uniform_size || target_size.is_some()) && !result.1.is_empty() {
+        let (tw, th) = target_size.unwrap_or_else(|| {
+            let mw = result.1.iter().map(|b| b.width).max().unwrap_or(1);
+            let mh = result.1.iter().map(|b| b.height).max().unwrap_or(1);
+            (mw, mh)
+        });
+        let cw = tw.min(w).max(1);
+        let ch_dim = th.min(h).max(1);
+        for b in &mut result.1 {
+            let cx = b.x + b.width / 2;
+            let cy = b.y + b.height / 2;
+            b.x = cx.saturating_sub(cw / 2).min(w.saturating_sub(cw));
+            b.y = cy.saturating_sub(ch_dim / 2).min(h.saturating_sub(ch_dim));
+            b.width = cw;
+            b.height = ch_dim;
+        }
+    }
+
     Ok(result)
 }
 
-/// 使用 Rayon 多线程并发裁剪指定坐标框并编码落盘保存至目标目录，返回输出文件路径列表。
+/// 将单块 RGBA 子图按 `uniform_mode`（`pad` 居中填充或 `resize` 缩放）规范化到统一尺寸。
+fn normalize_rgba_tile(
+    tile: ImageBuffer<Rgba<u8>, Vec<u8>>,
+    target_size: Option<(u32, u32)>,
+    uniform_mode: &str,
+    fill: [u8; 4],
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let Some((tw, th)) = target_size else {
+        return tile;
+    };
+    let (cw, ch) = tile.dimensions();
+    if cw == tw && ch == th {
+        return tile;
+    }
+    if uniform_mode == "resize" {
+        return image::imageops::resize(&tile, tw, th, FilterType::Triangle);
+    }
+
+    // pad 模式：超出目标画布时先等比缩放适配，再居中粘贴到背景画布
+    let fitted = if cw > tw || ch > th {
+        let scale = (tw as f32 / cw as f32).min(th as f32 / ch as f32);
+        let nw = ((cw as f32 * scale).round() as u32).max(1);
+        let nh = ((ch as f32 * scale).round() as u32).max(1);
+        image::imageops::resize(&tile, nw, nh, FilterType::Triangle)
+    } else {
+        tile
+    };
+    let (fw, fh) = fitted.dimensions();
+    let mut canvas = ImageBuffer::from_pixel(tw, th, Rgba(fill));
+    let ox = (tw.saturating_sub(fw)) / 2;
+    let oy = (th.saturating_sub(fh)) / 2;
+    image::imageops::overlay(&mut canvas, &fitted, ox as i64, oy as i64);
+    canvas
+}
+
+/// 使用 Rayon 多线程并发裁剪指定坐标框，支持统一宽高规范化并编码落盘保存至目标目录。
 #[pyfunction]
-#[pyo3(signature = (image_path, boxes, output_dir, prefix="slice", fmt="png"))]
+#[pyo3(signature = (
+    image_path,
+    boxes,
+    output_dir,
+    prefix="slice",
+    fmt="png",
+    target_size=None,
+    uniform_mode="pad"
+))]
 pub fn batch_crop_and_save_rs(
     py: Python<'_>,
     image_path: &str,
@@ -1705,6 +1797,8 @@ pub fn batch_crop_and_save_rs(
     output_dir: &str,
     prefix: &str,
     fmt: &str,
+    target_size: Option<(u32, u32)>,
+    uniform_mode: &str,
 ) -> PyResult<Vec<String>> {
     let img = image::open(image_path)
         .map_err(|e| PyValueError::new_err(format!("Failed to open image: {e}")))?;
@@ -1712,6 +1806,13 @@ pub fn batch_crop_and_save_rs(
     std::fs::create_dir_all(output_dir)
         .map_err(|e| PyValueError::new_err(format!("mkdir failed: {e}")))?;
     let ext = fmt.to_lowercase();
+    let u_mode = uniform_mode.to_lowercase();
+    let (bg_rgb, is_trans, _) = estimate_border_bg(rgba.as_raw(), rgba.width(), rgba.height(), 4);
+    let fill = if is_trans {
+        [0, 0, 0, 0]
+    } else {
+        [bg_rgb[0], bg_rgb[1], bg_rgb[2], 255]
+    };
 
     let paths: Result<Vec<String>, String> = py.allow_threads(|| {
         boxes
@@ -1720,8 +1821,9 @@ pub fn batch_crop_and_save_rs(
             .map(|(i, (x, y, w, h))| {
                 let cropped: ImageBuffer<Rgba<u8>, Vec<u8>> =
                     image::imageops::crop_imm(&rgba, x, y, w, h).to_image();
+                let normalized = normalize_rgba_tile(cropped, target_size, &u_mode, fill);
                 let out_path = Path::new(output_dir).join(format!("{prefix}_{:02}.{ext}", i + 1));
-                let dyn_img = DynamicImage::ImageRgba8(cropped);
+                let dyn_img = DynamicImage::ImageRgba8(normalized);
                 if ext == "jpg" || ext == "jpeg" {
                     dyn_img
                         .to_rgb8()
@@ -1738,22 +1840,36 @@ pub fn batch_crop_and_save_rs(
     paths.map_err(PyValueError::new_err)
 }
 
-/// 使用 Rayon 多线程在内存中并发裁剪并编码为指定图像格式的 `bytes` 列表，避免磁盘 I/O。
+/// 使用 Rayon 多线程在内存中并发裁剪、按需统一输出长宽并编码为指定图像格式的 `bytes` 列表。
 #[pyfunction]
-#[pyo3(signature = (image, boxes, fmt="png"))]
+#[pyo3(signature = (image, boxes, fmt="png", target_size=None, uniform_mode="pad"))]
 pub fn batch_crop_to_memory_rs<'py>(
     py: Python<'py>,
     image: PyReadonlyArray3<'_, u8>,
     boxes: Vec<(u32, u32, u32, u32)>,
     fmt: &str,
+    target_size: Option<(u32, u32)>,
+    uniform_mode: &str,
 ) -> PyResult<Vec<Bound<'py, PyBytes>>> {
     let (w, h, ch, buf) = borrow_image_bytes(&image)?;
     let slice: &[u8] = &buf;
     let ext = fmt.to_lowercase();
+    let u_mode = uniform_mode.to_lowercase();
     let img_fmt = match ext.as_str() {
         "jpg" | "jpeg" => ImageFormat::Jpeg,
         "webp" => ImageFormat::WebP,
         _ => ImageFormat::Png,
+    };
+
+    let (bg_rgb, is_trans, _) = if target_size.is_some() && u_mode == "pad" {
+        estimate_border_bg(slice, w, h, ch)
+    } else {
+        ([255, 255, 255, 255], false, 0.0)
+    };
+    let fill = if is_trans {
+        [0, 0, 0, 0]
+    } else {
+        [bg_rgb[0], bg_rgb[1], bg_rgb[2], 255]
     };
 
     let encoded: Result<Vec<Vec<u8>>, String> = py.allow_threads(|| {
@@ -1774,7 +1890,8 @@ pub fn batch_crop_to_memory_rs<'py>(
                 }
                 let ib = ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(cw, ch_box, out_rgba)
                     .ok_or_else(|| "Buffer construction failed".to_string())?;
-                let dyn_img = DynamicImage::ImageRgba8(ib);
+                let normalized = normalize_rgba_tile(ib, target_size, &u_mode, fill);
+                let dyn_img = DynamicImage::ImageRgba8(normalized);
                 let mut cursor = Cursor::new(Vec::new());
                 if img_fmt == ImageFormat::Jpeg {
                     dyn_img

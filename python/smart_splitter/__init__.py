@@ -11,4 +11,4 @@ smart-image-splitter Python 包入口模块。
 from .engine import SmartSplitter, SplitBox, SplitResult
 
 __all__ = ["SmartSplitter", "SplitBox", "SplitResult"]
-__version__ = "0.2.2"
+__version__ = "0.2.3"

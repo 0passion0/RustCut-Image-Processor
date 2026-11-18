@@ -1,4 +1,6 @@
+from io import BytesIO
 import numpy as np
+from PIL import Image
 from smart_splitter import SmartSplitter
 
 
@@ -57,4 +59,31 @@ def test_bleed_decontamination():
     left_box, right_box = sorted(res.boxes, key=lambda b: b.x)
     assert left_box.x + left_box.width <= 299
     assert right_box.x >= 300
+
+
+def test_uniform_size_modes():
+    img = np.full((600, 900, 3), 255, dtype=np.uint8)
+    img[20:220, 20:320] = [24, 52, 110]
+    img[20:280, 360:760] = [215, 72, 65]
+    img[320:540, 20:420] = [32, 145, 112]
+
+    # 1. uniform_size=True + uniform_mode="pad" -> 所有输出切片尺寸一致等于最大切片尺寸
+    pad_splitter = SmartSplitter(mode="auto", uniform_size=True, uniform_mode="pad")
+    res_pad, blobs_pad = pad_splitter.split_to_bytes(img, fmt="png")
+    assert res_pad.backend == "rust-rayon"
+    assert len(blobs_pad) == len(res_pad.boxes)
+    decoded_pad = [Image.open(BytesIO(b)).size for b in blobs_pad]
+    assert len(set(decoded_pad)) == 1
+
+    # 2. target_size=(256, 192) + uniform_mode="resize" -> 严格匹配指定宽高
+    resize_splitter = SmartSplitter(mode="auto", target_size=(256, 192), uniform_mode="resize")
+    _, blobs_resize = resize_splitter.split_to_bytes(img, fmt="png")
+    assert all(Image.open(BytesIO(b)).size == (256, 192) for b in blobs_resize)
+
+    # 3. uniform_size=True + uniform_mode="crop" -> 原图检测框自身即等宽等高
+    crop_splitter = SmartSplitter(mode="auto", uniform_size=True, uniform_mode="crop")
+    res_crop, blobs_crop = crop_splitter.split_to_bytes(img, fmt="png")
+    crop_box_dims = {(b.width, b.height) for b in res_crop.boxes}
+    assert len(crop_box_dims) == 1
+    assert all(Image.open(BytesIO(b)).size == next(iter(crop_box_dims)) for b in blobs_crop)
 
