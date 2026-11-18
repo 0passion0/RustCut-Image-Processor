@@ -28,5 +28,6 @@ jobs:
       - name: Check Rust crate & build with maturin
         run: |
           cargo check --all-targets
-          maturin develop --release
+          maturin build --release --out dist --find-interpreter
+          pip install --force-reinstall dist/*.whl
           pytest -v tests/

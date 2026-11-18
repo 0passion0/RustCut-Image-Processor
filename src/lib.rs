@@ -129,10 +129,19 @@ fn estimate_border_bg(buf: &[u8], w: u32, h: u32, ch: usize) -> ([u8; 4], bool, 
         entry.3 += s[2] as u64;
     }
 
-    let best = bins.values().max_by_key(|v| v.0).copied().unwrap_or((1, 255, 255, 255));
+    let best = bins
+        .values()
+        .max_by_key(|v| v.0)
+        .copied()
+        .unwrap_or((1, 255, 255, 255));
     let cnt = best.0.max(1) as u64;
     (
-        [(best.1 / cnt) as u8, (best.2 / cnt) as u8, (best.3 / cnt) as u8, 255],
+        [
+            (best.1 / cnt) as u8,
+            (best.2 / cnt) as u8,
+            (best.3 / cnt) as u8,
+            255,
+        ],
         false,
         best.0 as f32 / n as f32,
     )
@@ -146,7 +155,8 @@ fn collapse_gutter_runs(mut cands: Vec<SeamCandidate>) -> Vec<SeamCandidate> {
             continue;
         }
         let mut j = i;
-        while j + 1 < cands.len() && cands[j + 1].is_gutter && cands[j + 1].pos == cands[j].pos + 1 {
+        while j + 1 < cands.len() && cands[j + 1].is_gutter && cands[j + 1].pos == cands[j].pos + 1
+        {
             j += 1;
         }
         let mid = (i + j) / 2;
@@ -210,7 +220,8 @@ fn profile_horizontal_seams(
                 let ds = color_dist(p1, p2) as f32;
                 let dl = ((2 * p1[0] as i32 - p0[0] as i32 - p2[0] as i32).abs()
                     + (2 * p1[1] as i32 - p0[1] as i32 - p2[1] as i32).abs()
-                    + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs()) as f32
+                    + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs())
+                    as f32
                     * 0.5;
                 s_sum += ds;
                 l_sum += dl;
@@ -223,7 +234,11 @@ fn profile_horizontal_seams(
                 prev_luma = luma;
 
                 if bg_uniform {
-                    let is_bg = if is_trans { p1[3] < 24 } else { color_dist(p1, bg_rgb) < 22 };
+                    let is_bg = if is_trans {
+                        p1[3] < 24
+                    } else {
+                        color_dist(p1, bg_rgb) < 22
+                    };
                     if is_bg {
                         bg_hits += 1;
                     }
@@ -232,7 +247,13 @@ fn profile_horizontal_seams(
             }
             let sc = sample_count.max(1) as f32;
             let sm_denom = sample_count.saturating_sub(1).max(1) as f32;
-            (s_sum / sc, l_sum / sc, sm_sum / sm_denom, bg_hits as f32 / sc, active_row)
+            (
+                s_sum / sc,
+                l_sum / sc,
+                sm_sum / sm_denom,
+                bg_hits as f32 / sc,
+                active_row,
+            )
         })
         .collect();
 
@@ -342,7 +363,8 @@ fn profile_vertical_seams(
                     let ds = color_dist(p1, p2) as f32;
                     let dl = ((2 * p1[0] as i32 - p0[0] as i32 - p2[0] as i32).abs()
                         + (2 * p1[1] as i32 - p0[1] as i32 - p2[1] as i32).abs()
-                        + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs()) as f32
+                        + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs())
+                        as f32
                         * 0.5;
                     acc.0[rx] += ds;
                     acc.1[rx] += dl;
@@ -367,7 +389,11 @@ fn profile_vertical_seams(
                     }
 
                     if bg_uniform {
-                        let is_bg = if is_trans { p1[3] < 24 } else { color_dist(p1, bg_rgb) < 22 };
+                        let is_bg = if is_trans {
+                            p1[3] < 24
+                        } else {
+                            color_dist(p1, bg_rgb) < 22
+                        };
                         if is_bg {
                             acc.3[rx] += 1;
                         }
@@ -458,7 +484,11 @@ fn pick_peaks_nms(cands: &[SeamCandidate], threshold: f32, min_gap: u32) -> Vec<
         .copied()
         .filter(|c| c.score >= threshold && (c.is_gutter || c.coverage >= 0.72))
         .collect();
-    filtered.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    filtered.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut picked: Vec<SeamCandidate> = Vec::new();
     for cand in filtered {
@@ -491,7 +521,11 @@ fn is_region_empty_bg(
         while x < x1.saturating_sub(2) {
             let p = pixel_at(buf, stride, ch, x, y);
             total += 1;
-            if if is_trans { p[3] >= 24 } else { color_dist(p, bg_rgb) > 20 } {
+            if if is_trans {
+                p[3] >= 24
+            } else {
+                color_dist(p, bg_rgb) > 20
+            } {
                 fg += 1;
             }
             x += step_x;
@@ -533,8 +567,12 @@ fn recurse_xy(
         return;
     }
 
-    let h_cands = profile_horizontal_seams(buf, w, ch, x0, y0, x1, y1, min_dim, bg_rgb, bg_uniform, is_trans);
-    let v_cands = profile_vertical_seams(buf, w, ch, x0, y0, x1, y1, min_dim, bg_rgb, bg_uniform, is_trans);
+    let h_cands = profile_horizontal_seams(
+        buf, w, ch, x0, y0, x1, y1, min_dim, bg_rgb, bg_uniform, is_trans,
+    );
+    let v_cands = profile_vertical_seams(
+        buf, w, ch, x0, y0, x1, y1, min_dim, bg_rgb, bg_uniform, is_trans,
+    );
     let h_peaks = pick_peaks_nms(&h_cands, threshold, min_dim);
     let v_peaks = pick_peaks_nms(&v_cands, threshold, min_dim);
 
@@ -637,7 +675,8 @@ fn refine_and_trim(
                         + 0.5
                             * ((2 * p1[0] as i32 - p0[0] as i32 - p2[0] as i32).abs()
                                 + (2 * p1[1] as i32 - p0[1] as i32 - p2[1] as i32).abs()
-                                + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs()) as f32;
+                                + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs())
+                                as f32;
                     n += 1;
                     x += step;
                 }
@@ -666,7 +705,8 @@ fn refine_and_trim(
                         + 0.5
                             * ((2 * p1[0] as i32 - p0[0] as i32 - p2[0] as i32).abs()
                                 + (2 * p1[1] as i32 - p0[1] as i32 - p2[1] as i32).abs()
-                                + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs()) as f32;
+                                + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs())
+                                as f32;
                     n += 1;
                     x += step;
                 }
@@ -695,7 +735,8 @@ fn refine_and_trim(
                         + 0.5
                             * ((2 * p1[0] as i32 - p0[0] as i32 - p2[0] as i32).abs()
                                 + (2 * p1[1] as i32 - p0[1] as i32 - p2[1] as i32).abs()
-                                + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs()) as f32;
+                                + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs())
+                                as f32;
                     n += 1;
                     y += step;
                 }
@@ -724,7 +765,8 @@ fn refine_and_trim(
                         + 0.5
                             * ((2 * p1[0] as i32 - p0[0] as i32 - p2[0] as i32).abs()
                                 + (2 * p1[1] as i32 - p0[1] as i32 - p2[1] as i32).abs()
-                                + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs()) as f32;
+                                + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs())
+                                as f32;
                     n += 1;
                     y += step;
                 }
@@ -748,7 +790,11 @@ fn refine_and_trim(
             let mut x = xa;
             while x < xb {
                 let p = pixel_at(buf, stride, ch, x, y);
-                if if is_trans { p[3] < 24 } else { color_dist(p, bg_rgb) < 22 } {
+                if if is_trans {
+                    p[3] < 24
+                } else {
+                    color_dist(p, bg_rgb) < 22
+                } {
                     hits += 1;
                 }
                 total += 1;
@@ -762,7 +808,11 @@ fn refine_and_trim(
             let mut y = ya;
             while y < yb {
                 let p = pixel_at(buf, stride, ch, x, y);
-                if if is_trans { p[3] < 24 } else { color_dist(p, bg_rgb) < 22 } {
+                if if is_trans {
+                    p[3] < 24
+                } else {
+                    color_dist(p, bg_rgb) < 22
+                } {
                     hits += 1;
                 }
                 total += 1;
@@ -794,7 +844,10 @@ fn refine_and_trim(
             let (mut d, mut n) = (0u32, 0u32);
             let mut x = xa + 8;
             while x < xb.saturating_sub(8) {
-                d += color_dist(pixel_at(buf, stride, ch, x, y), pixel_at(buf, stride, ch, x, ry)) as u32;
+                d += color_dist(
+                    pixel_at(buf, stride, ch, x, y),
+                    pixel_at(buf, stride, ch, x, ry),
+                ) as u32;
                 n += 1;
                 x += step;
             }
@@ -805,7 +858,10 @@ fn refine_and_trim(
             let (mut d, mut n) = (0u32, 0u32);
             let mut y = ya + 8;
             while y < yb.saturating_sub(8) {
-                d += color_dist(pixel_at(buf, stride, ch, x, y), pixel_at(buf, stride, ch, rx, y)) as u32;
+                d += color_dist(
+                    pixel_at(buf, stride, ch, x, y),
+                    pixel_at(buf, stride, ch, rx, y),
+                ) as u32;
                 n += 1;
                 y += step;
             }
@@ -873,7 +929,9 @@ fn xy_cut_core(
     bg_uniform: bool,
     is_trans: bool,
 ) -> Vec<SplitBox> {
-    let min_dim = ((w.min(h) as f32) * min_region_ratio.clamp(0.04, 0.35)).round().max(24.0) as u32;
+    let min_dim = ((w.min(h) as f32) * min_region_ratio.clamp(0.04, 0.35))
+        .round()
+        .max(24.0) as u32;
     let threshold = 125.0 - sensitivity.clamp(0.1, 1.0) * 80.0;
 
     let mut leaves = Vec::new();
@@ -928,7 +986,8 @@ fn xy_cut_core(
                     let y_hi = (y_cut + 12).min(leaf.y1 - min_dim);
                     let step_x = ((leaf.x1 - leaf.x0) / 200).max(1);
                     for y in y_lo..=y_hi {
-                        let (mut step_s, mut line_s, mut smooth_s, mut act, mut n) = (0.0f32, 0.0f32, 0.0f32, 0u32, 0u32);
+                        let (mut step_s, mut line_s, mut smooth_s, mut act, mut n) =
+                            (0.0f32, 0.0f32, 0.0f32, 0u32, 0u32);
                         let mut prev = [0u8; 4];
                         let mut x = leaf.x0 + 4;
                         while x < leaf.x1.saturating_sub(4) {
@@ -938,7 +997,8 @@ fn xy_cut_core(
                             let ds = color_dist(p1, p2) as f32;
                             let dl = ((2 * p1[0] as i32 - p0[0] as i32 - p2[0] as i32).abs()
                                 + (2 * p1[1] as i32 - p0[1] as i32 - p2[1] as i32).abs()
-                                + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs()) as f32
+                                + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs())
+                                as f32
                                 * 0.5;
                             step_s += ds;
                             line_s += dl;
@@ -987,7 +1047,8 @@ fn xy_cut_core(
                     let x_hi = (x_cut + 12).min(leaf.x1 - min_dim);
                     let step_y = ((leaf.y1 - leaf.y0) / 200).max(1);
                     for x in x_lo..=x_hi {
-                        let (mut step_s, mut line_s, mut smooth_s, mut act, mut n) = (0.0f32, 0.0f32, 0.0f32, 0u32, 0u32);
+                        let (mut step_s, mut line_s, mut smooth_s, mut act, mut n) =
+                            (0.0f32, 0.0f32, 0.0f32, 0u32, 0u32);
                         let mut prev = [0u8; 4];
                         let mut y = leaf.y0 + 4;
                         while y < leaf.y1.saturating_sub(4) {
@@ -997,7 +1058,8 @@ fn xy_cut_core(
                             let ds = color_dist(p1, p2) as f32;
                             let dl = ((2 * p1[0] as i32 - p0[0] as i32 - p2[0] as i32).abs()
                                 + (2 * p1[1] as i32 - p0[1] as i32 - p2[1] as i32).abs()
-                                + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs()) as f32
+                                + (2 * p1[2] as i32 - p0[2] as i32 - p2[2] as i32).abs())
+                                as f32
                                 * 0.5;
                             step_s += ds;
                             line_s += dl;
@@ -1050,7 +1112,11 @@ fn xy_cut_core(
     } else {
         leaves.clone()
     };
-    let mut final_leaves = if non_empty.is_empty() { leaves } else { non_empty };
+    let mut final_leaves = if non_empty.is_empty() {
+        leaves
+    } else {
+        non_empty
+    };
 
     final_leaves.sort_by(|a, b| {
         let tol = ((a.y1 - a.y0).min(b.y1 - b.y0) as f32) * 0.35;
@@ -1065,15 +1131,18 @@ fn xy_cut_core(
     let (mut cur_r, mut cur_c) = (0usize, 0usize);
     let mut last_y = final_leaves.first().map(|l| l.y0).unwrap_or(0);
     for (idx, leaf) in final_leaves.iter().enumerate() {
-        if idx > 0 && (leaf.y0 as i64 - last_y as i64).abs() > ((leaf.y1 - leaf.y0) as f32 * 0.35) as i64 {
+        if idx > 0
+            && (leaf.y0 as i64 - last_y as i64).abs() > ((leaf.y1 - leaf.y0) as f32 * 0.35) as i64
+        {
             cur_r += 1;
             cur_c = 0;
             last_y = leaf.y0;
         } else if idx > 0 {
             cur_c += 1;
         }
-        let (rx0, ry0, rx1, ry1, tt, tr, tb, tl) =
-            refine_and_trim(slice, w, h, ch, leaf, bleed_trim, bg_rgb, bg_uniform, is_trans);
+        let (rx0, ry0, rx1, ry1, tt, tr, tb, tl) = refine_and_trim(
+            slice, w, h, ch, leaf, bleed_trim, bg_rgb, bg_uniform, is_trans,
+        );
         out.push(SplitBox {
             index: idx + 1,
             row: cur_r,
@@ -1083,7 +1152,11 @@ fn xy_cut_core(
             width: rx1.saturating_sub(rx0).max(1),
             height: ry1.saturating_sub(ry0).max(1),
             confidence: (leaf.conf / 150.0).min(1.0),
-            strategy: if leaf.is_gutter { "gutter".into() } else { "xycut".into() },
+            strategy: if leaf.is_gutter {
+                "gutter".into()
+            } else {
+                "xycut".into()
+            },
             trim_top: tt,
             trim_right: tr,
             trim_bottom: tb,
@@ -1286,7 +1359,8 @@ fn contours_core(
         }
     }
 
-    let min_area = ((sw * sh) as f32 * min_region_ratio.clamp(0.02, 0.3).powi(2) * 0.45).max(16.0) as usize;
+    let min_area =
+        ((sw * sh) as f32 * min_region_ratio.clamp(0.02, 0.3).powi(2) * 0.45).max(16.0) as usize;
     let is_fg = |x: u32, y: u32| -> bool {
         let p = pixel_at(slice, stride, ch, x, y);
         if is_trans {
@@ -1392,11 +1466,13 @@ fn uniform_grid_core(w: u32, h: u32, rows: u32, cols: u32, gutter_px: u32) -> Ve
     let mut boxes = Vec::with_capacity((r_cnt * c_cnt) as usize);
     let mut idx = 1usize;
     for r in 0..r_cnt {
-        let y0 = ((r as f32 * h as f32) / r_cnt as f32).round() as u32 + if r > 0 { half_g } else { 0 };
+        let y0 =
+            ((r as f32 * h as f32) / r_cnt as f32).round() as u32 + if r > 0 { half_g } else { 0 };
         let y1 = (((r + 1) as f32 * h as f32) / r_cnt as f32).round() as u32
             - if r < r_cnt - 1 { gutter_px - half_g } else { 0 };
         for c in 0..c_cnt {
-            let x0 = ((c as f32 * w as f32) / c_cnt as f32).round() as u32 + if c > 0 { half_g } else { 0 };
+            let x0 = ((c as f32 * w as f32) / c_cnt as f32).round() as u32
+                + if c > 0 { half_g } else { 0 };
             let x1 = (((c + 1) as f32 * w as f32) / c_cnt as f32).round() as u32
                 - if c < c_cnt - 1 { gutter_px - half_g } else { 0 };
             boxes.push(SplitBox {
@@ -1420,11 +1496,15 @@ fn uniform_grid_core(w: u32, h: u32, rows: u32, cols: u32, gutter_px: u32) -> Ve
     boxes
 }
 
-fn borrow_image_bytes<'a>(image: &'a PyReadonlyArray3<'_, u8>) -> PyResult<(u32, u32, usize, Cow<'a, [u8]>)> {
+fn borrow_image_bytes<'a>(
+    image: &'a PyReadonlyArray3<'_, u8>,
+) -> PyResult<(u32, u32, usize, Cow<'a, [u8]>)> {
     let view = image.as_array();
     let shape = view.shape();
     if shape.len() != 3 || (shape[2] != 3 && shape[2] != 4) {
-        return Err(PyValueError::new_err("Expected HxWx3 or HxWx4 uint8 numpy array"));
+        return Err(PyValueError::new_err(
+            "Expected HxWx3 or HxWx4 uint8 numpy array",
+        ));
     }
     let h = shape[0] as u32;
     let w = shape[1] as u32;
@@ -1450,7 +1530,18 @@ pub fn detect_recursive_xy_cut_rs(
     let slice: &[u8] = &buf;
     let boxes = py.allow_threads(|| {
         let (bg_rgb, is_trans, bg_unif) = estimate_border_bg(slice, w, h, ch);
-        xy_cut_core(slice, w, h, ch, sensitivity, min_region_ratio, bleed_trim, bg_rgb, bg_unif > 0.72, is_trans)
+        xy_cut_core(
+            slice,
+            w,
+            h,
+            ch,
+            sensitivity,
+            min_region_ratio,
+            bleed_trim,
+            bg_rgb,
+            bg_unif > 0.72,
+            is_trans,
+        )
     });
     Ok(boxes)
 }
@@ -1468,7 +1559,17 @@ pub fn detect_contours_rs(
     let slice: &[u8] = &buf;
     let boxes = py.allow_threads(|| {
         let (bg_rgb, is_trans, _) = estimate_border_bg(slice, w, h, ch);
-        contours_core(slice, w, h, ch, sensitivity, min_region_ratio, contour_gap_px, bg_rgb, is_trans)
+        contours_core(
+            slice,
+            w,
+            h,
+            ch,
+            sensitivity,
+            min_region_ratio,
+            contour_gap_px,
+            bg_rgb,
+            is_trans,
+        )
     });
     Ok(boxes)
 }
@@ -1493,13 +1594,26 @@ pub fn detect_auto_rs(
 
     let result = py.allow_threads(|| -> (String, Vec<SplitBox>) {
         if mode_lower == "grid" {
-            return ("grid".into(), uniform_grid_core(w, h, rows, cols, gutter_px));
+            return (
+                "grid".into(),
+                uniform_grid_core(w, h, rows, cols, gutter_px),
+            );
         }
         let (bg_rgb, is_trans, bg_unif) = estimate_border_bg(slice, w, h, ch);
         if mode_lower == "contour" {
             return (
                 "contour".into(),
-                contours_core(slice, w, h, ch, sensitivity, min_region_ratio, contour_gap_px, bg_rgb, is_trans),
+                contours_core(
+                    slice,
+                    w,
+                    h,
+                    ch,
+                    sensitivity,
+                    min_region_ratio,
+                    contour_gap_px,
+                    bg_rgb,
+                    is_trans,
+                ),
             );
         }
 
@@ -1531,10 +1645,14 @@ pub fn detect_auto_rs(
                 bg_rgb,
                 is_trans,
             );
-            let ct_area: u64 = ct_boxes.iter().map(|b| (b.width as u64) * (b.height as u64)).sum();
+            let ct_area: u64 = ct_boxes
+                .iter()
+                .map(|b| (b.width as u64) * (b.height as u64))
+                .sum();
             let total_area = (w as u64) * (h as u64);
             if ct_boxes.len() >= 2
-                && (xy_boxes.len() <= 1 || ((ct_area * 100) < (total_area * 65) && ct_boxes.len() >= xy_boxes.len()))
+                && (xy_boxes.len() <= 1
+                    || ((ct_area * 100) < (total_area * 65) && ct_boxes.len() >= xy_boxes.len()))
             {
                 return ("contour".into(), ct_boxes);
             }
@@ -1555,9 +1673,11 @@ pub fn batch_crop_and_save_rs(
     prefix: &str,
     fmt: &str,
 ) -> PyResult<Vec<String>> {
-    let img = image::open(image_path).map_err(|e| PyValueError::new_err(format!("Failed to open image: {e}")))?;
+    let img = image::open(image_path)
+        .map_err(|e| PyValueError::new_err(format!("Failed to open image: {e}")))?;
     let rgba = img.to_rgba8();
-    std::fs::create_dir_all(output_dir).map_err(|e| PyValueError::new_err(format!("mkdir failed: {e}")))?;
+    std::fs::create_dir_all(output_dir)
+        .map_err(|e| PyValueError::new_err(format!("mkdir failed: {e}")))?;
     let ext = fmt.to_lowercase();
 
     let paths: Result<Vec<String>, String> = py.allow_threads(|| {
@@ -1570,7 +1690,10 @@ pub fn batch_crop_and_save_rs(
                 let out_path = Path::new(output_dir).join(format!("{prefix}_{:02}.{ext}", i + 1));
                 let dyn_img = DynamicImage::ImageRgba8(cropped);
                 if ext == "jpg" || ext == "jpeg" {
-                    dyn_img.to_rgb8().save(&out_path).map_err(|e| e.to_string())?;
+                    dyn_img
+                        .to_rgb8()
+                        .save(&out_path)
+                        .map_err(|e| e.to_string())?;
                 } else {
                     dyn_img.save(&out_path).map_err(|e| e.to_string())?;
                 }
@@ -1620,9 +1743,14 @@ pub fn batch_crop_to_memory_rs<'py>(
                 let dyn_img = DynamicImage::ImageRgba8(ib);
                 let mut cursor = Cursor::new(Vec::new());
                 if img_fmt == ImageFormat::Jpeg {
-                    dyn_img.to_rgb8().write_to(&mut cursor, ImageFormat::Jpeg).map_err(|e| e.to_string())?;
+                    dyn_img
+                        .to_rgb8()
+                        .write_to(&mut cursor, ImageFormat::Jpeg)
+                        .map_err(|e| e.to_string())?;
                 } else {
-                    dyn_img.write_to(&mut cursor, img_fmt).map_err(|e| e.to_string())?;
+                    dyn_img
+                        .write_to(&mut cursor, img_fmt)
+                        .map_err(|e| e.to_string())?;
                 }
                 Ok(cursor.into_inner())
             })
@@ -1630,7 +1758,10 @@ pub fn batch_crop_to_memory_rs<'py>(
     });
 
     let buffers = encoded.map_err(PyValueError::new_err)?;
-    Ok(buffers.into_iter().map(|b| PyBytes::new_bound(py, &b)).collect())
+    Ok(buffers
+        .into_iter()
+        .map(|b| PyBytes::new_bound(py, &b))
+        .collect())
 }
 
 #[pymodule]
