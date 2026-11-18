@@ -1,4 +1,19 @@
+//! # smart-image-splitter (`_core`)
+//!
+//! 基于原生 Rust（`PyO3` + `Rayon` + `image`）打造的高性能复合图像智能切割核心扩展模块，
+//! 为 Python 侧 `smart_splitter.SmartSplitter` 提供零拷贝缓冲区借用与释放 GIL 的多线程计算内核。
+//!
+//! ## 核心算法模块
+//!
+//! - **方向阶跃 + 1px 细线能量剖面**：精准识别错位接缝与白底幻灯片之间的微弱阴影分割线。
+//! - **递归 XY-Cut BSP 与同级网格线传播**：在 $\pm 12\text{px}$ 窗口内找回跨栏低对比度微弱边界。
+//! - **留白沟壑检测与中点坍缩**：自动剔除纯白/透明过道废图并剥离外缘抗锯齿杂边（`bleed_trim`）。
+//! - **线性时间可分离形态学闭运算 + 并查集（DSU）**：以 $O(N)$ 复杂度提取 8-连通离散物体轮廓并执行 1:1 边缘收紧。
+//!
+//! - **开源协议**：`Apache-2.0 OR MIT`
+
 #![allow(clippy::useless_conversion, clippy::too_many_arguments)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
 use numpy::PyReadonlyArray3;
@@ -11,33 +26,47 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
 
+/// 导出给 Python 的单个切割子图矩形与边界修剪元数据。
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct SplitBox {
+    /// 子图在整张结果中的 1-based 序号。
     #[pyo3(get)]
     pub index: usize,
+    /// 子图所属的逻辑行索引（0-based）。
     #[pyo3(get)]
     pub row: usize,
+    /// 子图所属的逻辑列索引（0-based）。
     #[pyo3(get)]
     pub col: usize,
+    /// 包围盒左上角 X 坐标（px）。
     #[pyo3(get)]
     pub x: u32,
+    /// 包围盒左上角 Y 坐标（px）。
     #[pyo3(get)]
     pub y: u32,
+    /// 包围盒宽度（px）。
     #[pyo3(get)]
     pub width: u32,
+    /// 包围盒高度（px）。
     #[pyo3(get)]
     pub height: u32,
+    /// 分割置信度（范围 `0.0..=1.0`）。
     #[pyo3(get)]
     pub confidence: f32,
+    /// 命中的检测策略名称（`xycut` / `gutter` / `contour` / `grid`）。
     #[pyo3(get)]
     pub strategy: String,
+    /// 上边缘剥离的背景/抗锯齿杂边像素数（px）。
     #[pyo3(get)]
     pub trim_top: u32,
+    /// 右边缘剥离的背景/抗锯齿杂边像素数（px）。
     #[pyo3(get)]
     pub trim_right: u32,
+    /// 下边缘剥离的背景/抗锯齿杂边像素数（px）。
     #[pyo3(get)]
     pub trim_bottom: u32,
+    /// 左边缘剥离的背景/抗锯齿杂边像素数（px）。
     #[pyo3(get)]
     pub trim_left: u32,
 }
@@ -1517,6 +1546,7 @@ fn borrow_image_bytes<'a>(
     Ok((w, h, ch, buf))
 }
 
+/// 使用递归 XY-Cut BSP 算法执行接缝检测，计算过程释放 Python GIL。
 #[pyfunction]
 #[pyo3(signature = (image, sensitivity=0.65, min_region_ratio=0.08, bleed_trim=2))]
 pub fn detect_recursive_xy_cut_rs(
@@ -1546,6 +1576,7 @@ pub fn detect_recursive_xy_cut_rs(
     Ok(boxes)
 }
 
+/// 使用可分离形态学闭运算 + 并查集（DSU）提取离散对象轮廓包围盒，计算过程释放 GIL。
 #[pyfunction]
 #[pyo3(signature = (image, sensitivity=0.65, min_region_ratio=0.08, contour_gap_px=8))]
 pub fn detect_contours_rs(
@@ -1574,6 +1605,7 @@ pub fn detect_contours_rs(
     Ok(boxes)
 }
 
+/// 统一布局检测入口：支持 `auto` / `xycut` / `contour` / `grid` 四种模式，零拷贝借用 NumPy 缓冲区并释放 GIL。
 #[pyfunction]
 #[pyo3(signature = (image, mode="auto", sensitivity=0.65, min_region_ratio=0.08, bleed_trim=2, contour_gap_px=8, rows=3, cols=3, gutter_px=0))]
 pub fn detect_auto_rs(
@@ -1663,6 +1695,7 @@ pub fn detect_auto_rs(
     Ok(result)
 }
 
+/// 使用 Rayon 多线程并发裁剪指定坐标框并编码落盘保存至目标目录，返回输出文件路径列表。
 #[pyfunction]
 #[pyo3(signature = (image_path, boxes, output_dir, prefix="slice", fmt="png"))]
 pub fn batch_crop_and_save_rs(
@@ -1705,6 +1738,7 @@ pub fn batch_crop_and_save_rs(
     paths.map_err(PyValueError::new_err)
 }
 
+/// 使用 Rayon 多线程在内存中并发裁剪并编码为指定图像格式的 `bytes` 列表，避免磁盘 I/O。
 #[pyfunction]
 #[pyo3(signature = (image, boxes, fmt="png"))]
 pub fn batch_crop_to_memory_rs<'py>(
