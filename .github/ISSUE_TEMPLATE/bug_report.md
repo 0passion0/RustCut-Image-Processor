@@ -5,8 +5,8 @@ labels: bug
 ---
 
 ## Environment / 运行环境
-- Runtime (`Web Studio` / `Python + Rust PyO3` / `Python + OpenCV fallback`):
-- OS & CPU cores:
+- Backend (`Python + Rust PyO3` / `Python + OpenCV fallback`):
+- Python version & OS / CPU cores:
 
 ## Input Image Characteristics / 输入图像特征
 - Resolution (e.g., `2848x1600`):

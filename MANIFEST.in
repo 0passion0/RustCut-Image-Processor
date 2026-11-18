@@ -1,0 +1,9 @@
+include Cargo.toml
+include LICENSE
+include README.md
+include README.zh-CN.md
+include pyproject.toml
+include setup.py
+recursive-include src *.rs
+recursive-include python *.py
+recursive-include tests *.py

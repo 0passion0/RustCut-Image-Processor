@@ -1,8 +1,8 @@
-# SliceCraft · High-Precision Multi-Strategy Image Splitter
+# smart-image-splitter · High-Precision Rust + Python Image Splitter
 
 **English** | [简体中文](./README.zh-CN.md)
 
-**SliceCraft** is a dual-engine, pixel-accurate composite image segmentation system combining an **interactive full-stack Web Studio** (React + TypeScript + Express + `sharp`) with a **native Rust (`PyO3` + `Rayon`) + OpenCV Python package** (`smart-image-splitter`).
+**smart-image-splitter** is a high-performance, pixel-accurate composite image segmentation Python package powered by a **native Rust (`PyO3` + `Rayon`) core** and a **full-parity vectorized OpenCV / NumPy fallback engine**.
 
 It is engineered for real-world composite images where naive `W / N × H / M` grid slicing fails—including **slide sheets with misaligned seams**, **asymmetric Bento layouts**, **white-guttered collages**, **scattered objects on solid/transparent backgrounds**, and **overlapping photo grids (via optional ML segmentation hooks)**.
 
@@ -16,17 +16,16 @@ It is engineered for real-world composite images where naive `W / N × H / M` gr
    - [2.3 Gutter Valley Detection & Contiguous Run Collapsing](#23-gutter-valley-detection--contiguous-run-collapsing)
    - [2.4 Recursive Hierarchical XY-Cut BSP & Sibling Grid-Line Propagation](#24-recursive-hierarchical-xy-cut-bsp--sibling-grid-line-propagation)
    - [2.5 Per-Cell Discontinuity Snap & Bleed Decontamination](#25-per-cell-discontinuity-snap--bleed-decontamination)
-   - [2.6 Separable O(N) Contour Segmentation & 1:1 Tight Edge Refinement](#26-separable-on-contour-segmentation--11-tight-edge-refinement)
+   - [2.6 Separable O(N) DSU Contour Segmentation & 1:1 Tight Edge Refinement](#26-separable-on-dsu-contour-segmentation--11-tight-edge-refinement)
 3. [Engineering Practice & Extreme Performance Optimization](#3-engineering-practice--extreme-performance-optimization)
-4. [Measured Benchmarks & Precision Audit](#4-measured-benchmarks--precision-audit)
-5. [Quick Start](#5-quick-start)
-6. [Repository Structure](#6-repository-structure)
+4. [Quick Start (`pip install` Directly from GitHub)](#4-quick-start-pip-install-directly-from-github)
+5. [Repository Structure](#5-repository-structure)
 
 ---
 
 ## 1. Why Naive Grid Slicing Fails
 
-Consider the included `2848 × 1600` 3×3 presentation slide sheet (`public/assets/aistudio/...png`):
+Consider the included `2848 × 1600` 3×3 presentation slide sheet (`examples/sample_slides.png`):
 - A uniform 3×3 mathematical grid slices at `x = 949, 1898` and `y = 533, 1066`.
 - In reality, the true panel boundaries sit at:
   - Horizontal seams: `y = 531`, `y = 1043..1047`
@@ -83,7 +82,7 @@ When panels are separated by **wide solid or transparent gutters** (e.g., a `40p
 1. Border background color $\mathbf{b}$ and border uniformity $U_{\text{border}}$ are estimated via $8\times 8\times 8$-quantized histogram binning over 4 image perimeters (with alpha transparency check $\alpha < 32$).
 2. When $U_{\text{border}} > 0.72$, any interior strip with $> 95\%$ background match, low tangential variance ($S_{\text{tan}} < 2.5$), and foreground content present on **both sides** receives a high gutter score:
    $$\text{Score}_{\text{gutter}}(p) = \frac{110}{1 + S_{\text{tan}}(p)}$$
-3. **Contiguous Run Collapsing (`collapseGutterRuns`)**: A `40px` wide gutter generates 40 adjacent high-scoring rows/columns. Collapsing each contiguous gutter run $[i, j]$ to its single midpoint $\lfloor (i + j)/2 \rfloor$ guarantees we cut right down the center of the gutter rather than fracturing wide gutters into empty slivers. Empty background-only leaf regions ($< 3\%$ foreground density) are discarded automatically.
+3. **Contiguous Run Collapsing**: A `40px` wide gutter generates 40 adjacent high-scoring rows/columns. Collapsing each contiguous gutter run $[i, j]$ to its single midpoint $\lfloor (i + j)/2 \rfloor$ guarantees cutting right down the center of the gutter rather than fracturing wide gutters into empty slivers. Empty background-only leaf regions ($< 3\%$ foreground density) are discarded automatically.
 
 ### 2.4 Recursive Hierarchical XY-Cut BSP & Sibling Grid-Line Propagation
 
@@ -97,114 +96,116 @@ Rather than slicing globally along X and Y simultaneously:
 
 ### 2.5 Per-Cell Discontinuity Snap & Bleed Decontamination
 
-After BSP leaves are finalized, each cell undergoes two refinement stages (`refineAndTrimCell`):
+After BSP leaves are finalized, each cell undergoes two refinement stages:
 1. **Local $\pm 8\text{px}$ Edge Snap**: Each interior edge snaps independently within $\pm 8\text{px}$ to the exact pixel transition of *that specific cell* (correcting minor diagonal tilt or row-by-row drift).
-2. **Outer Margin & Anti-Aliased Bleed Decontamination (`bleedTrim`)**:
+2. **Outer Margin & Anti-Aliased Bleed Decontamination (`bleed_trim`)**:
    - First strips any remaining uniform canvas background rows/columns (`> 94%` background match).
-   - Then inspects up to `bleedTrim` (default `2px`) outer pixel rows/columns along internal cut edges against an interior reference line `ref = edge ± (bleedTrim + 2)`. Whenever the average $L_1$ difference exceeds `20`, the outer `1px` transition/divider pixel (e.g., `1px` gray border or JPEG chroma ringing) is peeled off—guaranteeing **zero white halo on dark slides and zero dark edge bleed on light slides**.
+   - Then inspects up to `bleed_trim` (default `2px`) outer pixel rows/columns along internal cut edges against an interior reference line `ref = edge ± (bleed_trim + 2)`. Whenever the average $L_1$ difference exceeds `20`, the outer `1px` transition/divider pixel (e.g., `1px` gray border or JPEG chroma ringing) is peeled off—guaranteeing **zero white halo on dark slides and zero dark edge bleed on light slides**.
 
-### 2.6 Separable $O(N)$ Contour Segmentation & 1:1 Tight Edge Refinement
+### 2.6 Separable $O(N)$ DSU Contour Segmentation & 1:1 Tight Edge Refinement
 
 When an image consists of scattered objects, UI stickers, or transparent RGBA sprites ($U_{\text{border}} > 0.72$ and contour coverage $< 65\%$ of total area with $\ge 2$ components, or explicit `contour` mode):
 1. Downsample onto a canonical $\le 720\text{px}$ grid (`scale = ceil(max(W, H) / 720)`) and threshold foreground against $\mathbf{b}$ (or $\alpha > 24$).
-2. Apply **separable 1D forward/backward sweep morphological closing/dilation** in $O(s_w \cdot s_h)$ time (independent of `contourGapPx`, avoiding $O(N \cdot r^2)$ nested loops).
-3. Extract 8-connected components (BFS in TypeScript, two-pass **Disjoint-Set Union with path halving** in Rust, or `cv2.connectedComponentsWithStats` in OpenCV).
-4. **1:1 Full-Resolution Edge Tightening**: Because downsampling introduces up to $\pm \text{scale}$ quantization error (e.g., $\pm 4\text{px}$ on a 2848px image), every component bounding box is shrunk/expanded directly against 1:1 raw image pixels until all 4 borders sit on exact foreground boundaries (`0px` integer error).
+2. Apply **separable 1D forward/backward sweep morphological closing/dilation** in $O(s_w \cdot s_h)$ time (independent of `contour_gap_px`, avoiding $O(N \cdot r^2)$ nested loops).
+3. Extract 8-connected components using two-pass **Disjoint-Set Union (DSU) with path halving** in Rust (`src/lib.rs`) or `cv2.connectedComponentsWithStats` in OpenCV (`python/smart_splitter/engine.py`).
+4. **1:1 Full-Resolution Edge Tightening**: Because downsampling introduces up to $\pm \text{scale}$ quantization error, every component bounding box is shrunk/expanded directly against 1:1 raw image pixels until all 4 borders sit on exact foreground boundaries (`0px` integer error).
 
 ---
 
 ## 3. Engineering Practice & Extreme Performance Optimization
 
-Translating mathematical theory into sub-200ms production speed required solving five concrete systems bottlenecks:
-
 | Optimization | Problem Solved | Concrete Implementation |
 |---|---|---|
-| **1. Row-Major Vertical Scanning** | Vertical loops `for x { for y }` stride `W * 4 = 11.4 KB` per pixel read, thrashing CPU L1/L2 caches | Inverted `profileVerticalSeams` to `for y { for x }` row-major traversal (and `ys.par_iter().fold().reduce()` in Rust), keeping all reads sequential in cache lines |
-| **2. Single-Pass Active Tracking** | Allocating `Float32Array(span * 200)` 2D energy matrices per recursive band wasted MBs of RAM/GC | Replaced 2D matrices with a monotonic `lastMarked` 1D index tracker (`Uint16Array`), proving exact equivalence to `max_{r \in [p-2,p+2]} E(r,u) > 16` in zero extra 2D memory |
-| **3. 200-Sample Orthogonal Stride** | Scanning all 2,848 pixels horizontally at every row is redundant for global seams; skipping primary-axis rows *missed* `1px` odd-coordinate hairlines | Kept primary-axis step strictly **`1px`** (never misses `1px` hairlines) while striding the orthogonal axis to $\approx 200$ samples (`stepOrtho = floor(span / 200)`) |
-| **4. Zero-Copy & LUT Arithmetic** | Repeated `Math.pow(cov, 2.4)` calls, `[r,g,b,a]` array allocations in hot loops, and NumPy array cloning | Precomputed 257-entry `COV_POW_LUT`; eliminated helper object allocations inside sibling propagation; borrowed C-contiguous NumPy buffers zero-copy in Rust (`Cow<[u8]>`) with `py.allow_threads` |
-| **5. Raw RAM Job Caching (`server.ts`)** | Interactive UI slider changes were re-decoding AND re-encoding 4MB PNGs (`~600ms` wasted I/O per slider drag) | Cached decoded RGBA buffers in RAM; skipped redundant PNG re-encoding when EXIF `orientation <= 1`; extracted `/api/crop` and `/api/export-zip` directly from raw RAM buffers |
+| **1. Row-Major Parallel Scanning (`Rayon`)** | Vertical column loops `for x { for y }` stride `W * C` bytes per pixel read, thrashing CPU L1/L2 caches | Inverted vertical profiling to row-major `ys.par_iter().fold().reduce()` in Rust so every CPU thread streams contiguous cache lines |
+| **2. Single-Pass Active Tracking** | Allocating `O(span × 200)` 2D energy matrices per recursive band wasted memory bandwidth | Replaced 2D matrices with a monotonic 1D cursor tracker proving exact equivalence to $\max_{r \in [p-2,p+2]} E(r,u) > 16$ |
+| **3. 200-Sample Orthogonal Stride** | Scanning all 2,848 pixels horizontally at every row is redundant; skipping primary-axis rows misses `1px` odd hairlines | Kept primary-axis step strictly **`1px`** while striding the orthogonal axis to $\approx 200$ samples |
+| **4. Zero-Copy NumPy Borrow + GIL Release** | Copying multi-megapixel NumPy buffers across FFI and blocking Python threads | Borrows C-contiguous NumPy arrays zero-copy (`Cow<[u8]>`) and releases the GIL via `py.allow_threads(...)` during detection and encoding |
+| **5. Parallel In-Memory Batch Cropping** | Disk I/O bottlenecks when serving slices via FastAPI or feeding PyTorch DataLoaders | `batch_crop_to_memory_rs` encodes all slices concurrently in RAM across Rayon worker threads without touching disk |
 
 ---
 
-## 4. Measured Benchmarks & Precision Audit
+## 4. Quick Start (`pip install` Directly from GitHub)
 
-All TypeScript + `sharp` + Express measurements below were executed directly on the `2848 × 1600` 3×3 composite slide image (`4.56 MP`, RGBA) and `1500 × 950` contour test suite in Node.js v22:
+### Installation (Zero Extra Setup)
 
-| Metric | Before Optimization | After Optimization |
-|---|---|---|
-| `analyzeAndSplit` core latency (`2848×1600` RGBA, Node.js) | `390 – 445 ms` | **`155 – 190 ms`** (~2.4× faster) |
-| Cached HTTP `/api/analyze` roundtrip (slider/mode switch) | `~750 ms` (decode + re-encode) | **`193 ms`** (0ms decode) |
-| `2848×1600` 3×3 slide slice count & seam adaptation | `9 / 9` (`x=1826` top vs `x=1813` bottom) | **`9 / 9` (`0` border bleed pixels)** |
-| `#2` right edge / `#5, #8` left 1px gray divider removal | Bleed / `1px` `(213,214,217)` residue | **Clean `(252,252,254)` content edge** |
-| `1500×950` contour bounding box precision (`5` targets) | `±4–8 px` scale quantization pad | **`0 px` exact (`320×280 @ 80,70`)** |
-
-> Note on Rust verification: The container running this Web Studio has Node.js v22, TypeScript, `sharp`, and Playwright Chromium (where all 6 unit tests, `tsc --noEmit`, `vite build`, and live headless Chromium E2E tests ran and passed). `rustc`/`cargo`/`maturin` are not preinstalled in this container; run `maturin develop --release && pytest` locally or via the included GitHub Actions CI workflow (`.github/workflows/ci.yml`) to compile and benchmark the native multi-core Rust binary.
-
----
-
-## 5. Quick Start
-
-### A. Interactive Web Studio (Full-Stack TypeScript + Sharp)
 ```bash
-npm install
-npm run dev          # Starts Express + Vite on http://localhost:3000
+# Option 1: Install directly via Git + pip (recommended)
+pip install git+https://github.com/<owner>/<repo>.git
 
-# Run unit tests & type checks
-npx tsx --test src/utils/splitterCore.test.ts
-npm run lint
-npm run build
+# Option 2: Install via GitHub source archive URL (works even without git CLI installed)
+pip install https://github.com/<owner>/<repo>/archive/refs/heads/main.zip
+
+# Option 3: Install a prebuilt binary wheel from GitHub Releases (precompiled Rust PyO3, no compiler needed)
+pip install https://github.com/<owner>/<repo>/releases/latest/download/smart_image_splitter-0.2.0-cp311-cp311-manylinux_2_17_x86_64.whl
 ```
 
-### B. Native Rust (`PyO3` + `Rayon`) + Python Engine
+> **Note on GitHub URLs & `pip`**: Standard `pip` cannot install a bare GitHub webpage URL (`pip install https://github.com/owner/repo`) because GitHub serves HTML there. Always use `git+https://github.com/owner/repo` or `/archive/refs/heads/main.zip` (or a Release `.whl`).
+>
+> **Automatic Rust / OpenCV Dual-Backend**:
+> - If `cargo` (Rust toolchain) is installed on the target machine, `pip install` automatically compiles `smart_splitter._core` (`PyO3` + `Rayon`) in release mode.
+> - If `cargo` is **not** installed, `setup.py` skips Rust compilation gracefully with **zero errors** and uses the full-parity vectorized OpenCV / NumPy backend.
+> - Pushing a version tag (`git tag v0.2.0 && git push --tags`) triggers `.github/workflows/release-wheels.yml` (`PyO3/maturin-action`) to publish prebuilt native Rust wheels for Linux, macOS, and Windows.
+
+### CLI & Python API Usage
+
 ```bash
-cd python_rust_splitter
-pip install maturin opencv-python-headless numpy pillow pytest
-
-# Compile native release Rust extension
-maturin develop --release
-
-# CLI usage
-smart-split input_sheet.png -o ./output_slices --mode auto --bleed-trim 2 --format png
-
-# Run Python test suite
-pytest -v tests/
+# CLI batch splitting
+smart-split examples/sample_slides.png -o ./output_slices --mode auto --bleed-trim 2 --format png
 ```
 
-Python API (including zero-disk in-memory splitting and custom ML hook):
 ```python
+import cv2
 from smart_splitter import SmartSplitter
 
 splitter = SmartSplitter(mode="auto", sensitivity=0.65, bleed_trim=2)
-result, paths = splitter.split_file("sheet.png", "output_slices/")
+
+# 1. File-to-directory splitting
+result, paths = splitter.split_file("examples/sample_slides.png", "output_slices/")
 print(f"Split into {len(paths)} slices via {result.backend} in {result.elapsed_ms:.1f}ms")
 
-# Zero-disk in-memory byte buffers (for FastAPI / PyTorch dataloaders)
-result, png_blobs = splitter.split_to_bytes(image_array, fmt="png")
+# 2. Zero-disk in-memory splitting (FastAPI / PyTorch dataloaders)
+img = cv2.imread("examples/sample_slides.png")
+result, png_blobs = splitter.split_to_bytes(img, fmt="png")
+
+# 3. Optional ML segmentation hook (SAM 2 / YOLO / ONNX) for overlapping natural photos
+ml_splitter = SmartSplitter(ml_segmenter=my_sam2_box_predictor)
+```
+
+### Local Development & Testing
+
+```bash
+pip install setuptools wheel setuptools-rust maturin pytest numpy opencv-python-headless pillow
+maturin develop --release
+pytest -v tests/
 ```
 
 ---
 
-## 6. Repository Structure
+## 5. Repository Structure
 
 ```text
 .
+├── Cargo.toml                        # Rust PyO3 + Rayon crate manifest
+├── pyproject.toml                    # PEP 517 + setuptools / maturin build configuration
+├── setup.py                          # Optional Rust extension builder with graceful fallback
+├── MANIFEST.in                       # Source distribution manifest (Python + Rust sources only)
+├── LICENSE / CONTRIBUTING.md
+├── README.md / README.zh-CN.md
 ├── .github/
-│   ├── workflows/ci.yml              # CI for TypeScript/Web & Rust/PyO3/Python
+│   ├── workflows/
+│   │   ├── ci.yml                    # Root pip install + Cargo + maturin + pytest CI
+│   │   └── release-wheels.yml        # Multi-OS prebuilt wheel publisher (Linux/macOS/Windows)
 │   ├── ISSUE_TEMPLATE/bug_report.md
 │   └── pull_request_template.md
-├── .gitignore / .gitattributes / .editorconfig / LICENSE / CONTRIBUTING.md
-├── README.md                         # English documentation (Theory + Practice)
-├── README.zh-CN.md                   # 简体中文文档（算法理论推导 + 工程优化实践）
-├── server.ts                         # Express API with raw RAM buffer cache & ZIP exporter
 ├── src/
-│   ├── utils/splitterCore.ts         # Core XY-Cut + Sibling Propagation + Contour + Bleed Trim engine
-│   ├── utils/splitterCore.test.ts    # Pixel-level Node unit tests (6/6 passing)
-│   └── components/                   # Interactive Canvas overlay, 1:1 Lightbox, Source Browser UI
-└── python_rust_splitter/             # Standalone downloadable Rust + Python package
-    ├── Cargo.toml / pyproject.toml / .gitignore / LICENSE
-    ├── README.md / README.zh-CN.md
-    ├── src/lib.rs                    # PyO3 + Rayon parallel XY-Cut, DSU Contour & Memory Crop
-    ├── python/smart_splitter/        # Python API wrapper, OpenCV fallback, ML hook, CLI
-    └── tests/test_splitter.py
+│   └── lib.rs                        # Native Rust (PyO3 + Rayon) engine: XY-Cut, DSU Contour & Memory Crop
+├── python/
+│   └── smart_splitter/
+│       ├── __init__.py               # Public exports (SmartSplitter, SplitBox, SplitResult)
+│       ├── engine.py                 # Hybrid Rust / full-parity OpenCV engine & ML hook
+│       └── cli.py                    # `smart-split` CLI entrypoint
+├── tests/
+│   └── test_splitter.py              # Pytest unit tests (XY-Cut, White Gutter, Bleed Trim, Contour)
+└── examples/
+    └── sample_slides.png             # Real-world 2848x1600 3x3 slide benchmark image
 ```

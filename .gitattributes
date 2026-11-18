@@ -1,22 +1,13 @@
 # Normalize line endings across OS environments
 * text=auto eol=lf
 
-# Source code & documentation
-*.ts text eol=lf
-*.tsx text eol=lf
-*.js text eol=lf
-*.jsx text eol=lf
-*.mjs text eol=lf
-*.cjs text eol=lf
+# Rust & Python source code + configs + docs
 *.rs text eol=lf
 *.py text eol=lf
 *.toml text eol=lf
-*.json text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
 *.md text eol=lf
-*.css text eol=lf
-*.html text eol=lf
 *.sh text eol=lf
 
 # Windows batch scripts

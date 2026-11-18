@@ -1,10 +1,10 @@
-# SliceCraft · 高精度混合策略智能图像切割引擎
+# smart-image-splitter · 高精度 Rust + Python 智能图像切割包
 
 [English](./README.md) | **简体中文**
 
-**SliceCraft** 是一套面向生产环境的像素级复合图像自动切割系统，包含**全栈交互式 Web 工作台**（React + TypeScript + Express + `sharp`）与**底层 Rust (`PyO3` + `Rayon`) + OpenCV Python 原生引擎包**（`smart-image-splitter`）。
+**smart-image-splitter** 是一个可直接通过 `pip install` 安装的像素级复合图像自动切割 Python 工具包，底层由 **原生 Rust (`PyO3` + `Rayon`) 并行计算内核** 与 **全特性对齐的向量化 OpenCV / NumPy 回退引擎** 驱动。
 
-系统专为解决“传统等分网格切歪、串色、漏切”等实际痛点而设计，能够高精度处理**错位排版 PPT 组图**、**非对称 Bento 拼图**、**白边隔离卡片集**、**纯色/透明背景离散图标与精灵图**，并支持通过机器学习回调接入 **SAM 2 / YOLO / ONNX** 分割模型处理自然重叠场景。
+系统专为解决“传统 `W/N × H/M` 等分网格切歪、串色、漏切”等痛点而设计，能够高精度处理**错位排版 PPT 组图**、**非对称 Bento 拼图**、**白边隔离卡片集**、**纯色/透明背景离散图标与精灵图**，并支持通过回调接入 **SAM 2 / YOLO / ONNX** 模型处理自然重叠场景。
 
 ---
 
@@ -18,15 +18,14 @@
    - [2.5 单面板 ±8px 局部边缘吸附与抗锯齿去杂边](#25-单面板-8px-局部边缘吸附与抗锯齿去杂边)
    - [2.6 线性时间可分离膨胀 + Union-Find 轮廓提取与 1:1 边缘收紧](#26-线性时间可分离膨胀--union-find-轮廓提取与-11-边缘收紧)
 3. [工程落地实践与极限性能优化](#3-工程落地实践与极限性能优化)
-4. [实测性能与像素精度审计](#4-实测性能与像素精度审计)
-5. [快速开始](#5-快速开始)
-6. [仓库目录结构](#6-仓库目录结构)
+4. [快速开始（直接从 GitHub `pip install`）](#4-快速开始直接从-github-pip-install)
+5. [仓库目录结构](#5-仓库目录结构)
 
 ---
 
 ## 1. 为什么传统等分网格必然切歪？
 
-以项目内置的 `2848 × 1600` 九宫格演示文稿为例：
+以仓库内置的 `2848 × 1600` 九宫格演示文稿示例图（`examples/sample_slides.png`）为例：
 - 传统 `W/3 × H/3` 均匀等分会在 `x = 949, 1898` 与 `y = 533, 1066` 下刀。
 - 实际上，该图真实子图边界存在显著的非均匀与局部错位：
   - 水平边界：`y = 531` 与 `y = 1043..1047`；
@@ -72,7 +71,7 @@ $$E(p, u) = E_{\text{step}}(p, u) + E_{\text{line}}(p, u)$$
 
 3. **综合分割评分公式**：
    $$\text{Score}_{\text{seam}}(p) = \frac{\left(\bar{E}_{\text{step}}(p) + 0.7\,\bar{E}_{\text{line}}(p)\right) \cdot C(p)^{2.4}}{1 + 0.12 \cdot S_{\min}(p)}$$
-   候选峰值通过**一维非极大值抑制（NMS）**提取，最小峰间距为 $d_{\min} = \max(24, \text{minRegionRatio} \cdot \min(W, H))$，并要求 $C(p) \ge 0.72$。
+   候选峰值通过**一维非极大值抑制（NMS）**提取，最小峰间距为 $d_{\min} = \max(24, \text{min\_region\_ratio} \cdot \min(W, H))$，并要求 $C(p) \ge 0.72$。
 
 ### 2.3 留白沟壑谷值检测与连续区间中点坍缩
 
@@ -80,7 +79,7 @@ $$E(p, u) = E_{\text{step}}(p, u) + E_{\text{line}}(p, u)$$
 1. 基于图像四周边缘像素构建 $8\times 8\times 8$ 量化直方图估计主背景色 $\mathbf{b}$ 与边缘一致性 $U_{\text{border}}$（透明图直接检测 $\alpha < 32$ 比例）。
 2. 当 $U_{\text{border}} > 0.72$ 时，若某一内部分割带满足背景匹配率 $> 95\%$、切向抖动 $S_{\text{tan}} < 2.5$ 且**两侧均存在前景内容**，则赋予留白谷值分：
    $$\text{Score}_{\text{gutter}}(p) = \frac{110}{1 + S_{\text{tan}}(p)}$$
-3. **连续沟壑区间坍缩（`collapseGutterRuns`）**：宽 `40px` 的白色过道会产生 40 条相邻高分线。将连续沟壑区间 $[i, j]$ 坍缩到唯一几何中点 $\lfloor (i + j)/2 \rfloor$，彻底杜绝“同一条宽白边被切成两条线并产生空白废图”的问题；叶子区域前景占比低于 $3\%$ 的纯背景块自动剔除。
+3. **连续沟壑区间坍缩**：宽 `40px` 的白色过道会产生 40 条相邻高分线。将连续沟壑区间 $[i, j]$ 坍缩到唯一几何中点 $\lfloor (i + j)/2 \rfloor$，彻底杜绝“同一条宽白边被切成两条线并产生空白废图”的问题；叶子区域前景占比低于 $3\%$ 的纯背景块自动剔除。
 
 ### 2.4 递归分层 XY-Cut BSP 与同级网格线传播
 
@@ -91,114 +90,116 @@ $$E(p, u) = E_{\text{step}}(p, u) + E_{\text{line}}(p, u)$$
 
 ### 2.5 单面板 ±8px 局部边缘吸附与抗锯齿去杂边
 
-BSP 划分出独立子区域后，执行两步精修（`refineAndTrimCell`）：
+BSP 划分出独立子区域后，执行两步精修：
 1. **±8px 局部边界吸附**：针对单个子图的上下左右四条内边在 $\pm 8\text{px}$ 内独立对齐至本区域真实像素跃迁点。
-2. **外缘背景裁剪与防串色去杂边（Bleed Decontamination）**：
+2. **外缘背景裁剪与防串色去杂边（`bleed_trim`）**：
    - 先自动剥离四边残留的整行/整列统一背景（$> 94\%$ 匹配率）。
-   - 再沿内部切割边取最外侧 `0..bleedTrim`（默认 `2px`）像素，与内侧参考行/列 `ref = edge ± (bleedTrim + 2)` 计算平均 $L_1$ 色差。当色差 $> 20$ 时剥离该过渡像素或 `1px` 灰线——做到**深色卡片不带白边、白底卡片不带灰线黑边**。
+   - 再沿内部切割边取最外侧 `0..bleed_trim`（默认 `2px`）像素，与内侧参考行/列 `ref = edge ± (bleed_trim + 2)` 计算平均 $L_1$ 色差。当色差 $> 20$ 时剥离该过渡像素或 `1px` 灰线——做到**深色卡片不带白边、白底卡片不带灰线黑边**。
 
 ### 2.6 线性时间可分离膨胀 + Union-Find 轮廓提取与 1:1 边缘收紧
 
 针对纯色或透明背景上散落的独立图标、贴纸、商品图集：
 1. 降采样至最大边 $\le 720\text{px}$ 网格（`scale = ceil(max(W, H) / 720)`）生成前景二值掩膜。
-2. **可分离 $O(s_w \cdot s_h)$ 双向扫描形态学闭运算**：水平 + 垂直两趟正反向游程扫描实现任意 `contourGapPx` 闭运算合并，复杂度与核半径无关。
-3. **8-连通域提取**：Rust 端采用无递归**并查集（DSU + 路径减半）**，TypeScript 端采用定长 `Int32Array` BFS，OpenCV 回退端采用 `cv2.connectedComponentsWithStats`。
+2. **可分离 $O(s_w \cdot s_h)$ 双向扫描形态学闭运算**：水平 + 垂直两趟正反向游程扫描实现任意 `contour_gap_px` 闭运算合并，复杂度与核半径无关。
+3. **8-连通域提取**：Rust 端（`src/lib.rs`）采用无递归**并查集（DSU + 路径减半）**，OpenCV 回退端采用 `cv2.connectedComponentsWithStats`。
 4. **1:1 原图分辨率边缘收紧**：消除降采样带来的 $\pm \text{scale}$ 像素量化误差，直接在 1:1 原始像素矩阵上收紧/微扩四边包围盒，实现 **0px 坐标误差**。
 
 ---
 
 ## 3. 工程落地实践与极限性能优化
 
-算法理论之外，工程实现决定了系统在 4K/多兆像素大图上的实际吞吐表现：
-
 | 工程优化项 | 解决的性能/精度瓶颈 | 具体实现方案 |
 |---|---|---|
-| **1. 行主序缓存友好扫描** | 传统列剖面 `for x { for y }` 每次跨行跳转 `W * 4 = 11.4KB`，导致严重 CPU L1/L2 Cache Miss | 将 `profileVerticalSeams` 改写为外层按行 `y` 顺序遍历（Rust 端使用 `ys.par_iter().fold().reduce()` 并行归约），所有内存访问均命中连续缓存行 |
-| **2. 单遍邻域激活追踪** | 每个递归子区域分配二维 `Float32Array(span * 200)` 能量矩阵造成大量内存读写与 GC | 利用 `|r - p| <= 2` 的对称性，仅用一维 `lastMarked` 单调游标 + `Uint16Array` 在单遍扫描中完成 $\pm 2\text{px}$ 覆盖统计，**消除全部二维能量矩阵分配** |
-| **3. 正交 200 采样 + 主轴 1px 步进** | 主轴跳行采样会漏检位于奇数坐标（如 `y=531, 1043`）的 `1px` 细线；正交轴全量扫描 2848 列冗余度极高 | 严格保持主扫描轴 **`1px` 逐行/逐列扫描**不漏线，仅对正交方向按 $\approx 200$ 个点步进采样（`stepOrtho = floor(span / 200)`） |
-| **4. 查表法与零内存拷贝** | 密集调用 `Math.pow(cov, 2.4)`、创建 `[r,g,b,a]` 临时数组以及跨语言内存拷贝 | 预计算 257 项 `COV_POW_LUT` 查表；同级传播改用底层 TypedArray 扁平索引；Rust 端对 C-contiguous NumPy 数组通过 `Cow<[u8]>` **零拷贝借用**并 `allow_threads` 释放 Python GIL |
-| **5. 服务端原始像素 RAM 缓存** | Web 端调节灵敏度/去杂边滑块时重复解码+重编码 4MB PNG 耗费约 600ms I/O | `server.ts` 缓存解码后 RGBA 像素；未旋转图像免去 PNG 重编码；`/api/analyze`、单图裁剪与批量 ZIP 导出直接基于内存 `rawData` 零解码切片 |
+| **1. 行主序 Rayon 并行扫描** | 传统列剖面 `for x { for y }` 每次跨行跳转 `W * C` 字节，导致严重 CPU L1/L2 Cache Miss | 在 Rust 端改为 `ys.par_iter().fold().reduce()` 行主序并行归约，所有内存访问均命中连续缓存行 |
+| **2. 单遍邻域激活追踪** | 每个递归子区域分配二维 `O(span × 200)` 能量矩阵造成大量内存读写 | 用一维单调游标实现 $\pm 2\text{px}$ 邻域最大值追踪，消除二维能量矩阵分配 |
+| **3. 正交 200 采样 + 主轴 1px 步进** | 主轴跳行采样会漏检位于奇数坐标（如 `y=531, 1043`）的 `1px` 细线 | 严格保持主扫描轴 **`1px` 逐行/逐列扫描**不漏线，仅对正交方向按 $\approx 200$ 个点步进采样 |
+| **4. 零拷贝 NumPy 借用与释放 GIL** | 大图跨 FFI 内存拷贝与阻塞 Python 主线程 | Rust 端对 C-contiguous NumPy 数组通过 `Cow<[u8]>` **零拷贝借用**，并通过 `py.allow_threads(...)` 释放 Python GIL |
+| **5. 内存级并发裁剪编码** | 服务端接口或深度学习 DataLoader 写磁盘产生高 I/O 开销 | `batch_crop_to_memory_rs` 在内存中通过 Rayon 多线程并发编码裁剪字节流，零磁盘临时文件 |
 
 ---
 
-## 4. 实测性能与像素精度审计
+## 4. 快速开始（直接从 GitHub `pip install`）
 
-以下数据均在 Node.js v22 环境下基于真实 `2848 × 1600`（456 万像素）9 宫格原图及 `1500 × 950` 轮廓基准图实测获得：
+### 一行命令安装（无需其他操作）
 
-| 验证指标 | 优化前 | 极限优化后 |
-|---|---|---|
-| `analyzeAndSplit` 核心耗时 (`2848×1600` RGBA) | `390 – 445 ms` | **`155 – 190 ms`**（提速约 **2.4 倍**） |
-| Web 端缓存态调参/切换模式端到端耗时 (`/api/analyze`) | `~750 ms` | **`193 ms`**（0ms 重复解码） |
-| `2848×1600` 9 宫格识别准确度 | 9 / 9 张 | **`9 / 9` 张**（自适应 `x=1826` vs `x=1813` 错位） |
-| 边缘防串色审计（`#2` 右 / `#5,#8` 左 1px 灰线 / `#9` 左上） | 存在 1px 灰线或过渡像素残留 | **36 条外边全部 `0` 杂边残留** |
-| `1500×950` 高分辨率轮廓提取（5 个散落目标） | 存在 `±4–8 px` 降采样量化余量 | **`0 px` 整数精度误差**（精确命中 `320×280 @ 80,70` 等） |
-
-> 环境说明：当前运行容器预装了 Node.js v22、TypeScript、`sharp` 与 Playwright 无头 Chromium（全部 6 项核心单测、`tsc --noEmit`、`vite build` 及无头浏览器实测均已通过）。由于容器内未预装 `rustc` / `cargo` / `pip`，Rust 原生二进制编译与 `pytest` 可通过本地环境或仓库自带 GitHub Actions CI（`.github/workflows/ci.yml`）执行。
-
----
-
-## 5. 快速开始
-
-### A. 启动全栈交互式 Web 工作台
 ```bash
-npm install
-npm run dev          # 启动 Express + Vite (http://localhost:3000)
+# 方式 1：通过 Git + pip 直接从 GitHub 安装（推荐）
+pip install git+https://github.com/<owner>/<repo>.git
 
-# 运行像素级单元测试与构建检查
-npx tsx --test src/utils/splitterCore.test.ts
-npm run lint
-npm run build
+# 方式 2：通过 GitHub 源码压缩包 URL 安装（目标机器无需安装 git 客户端）
+pip install https://github.com/<owner>/<repo>/archive/refs/heads/main.zip
+
+# 方式 3：安装 GitHub Releases 预编译二进制 Wheel（免编译直出原生 Rust 加速版）
+pip install https://github.com/<owner>/<repo>/releases/latest/download/smart_image_splitter-0.2.0-cp311-cp311-manylinux_2_17_x86_64.whl
 ```
 
-### B. 编译与使用 Rust (`PyO3` + `Rayon`) + Python 原生引擎
+> **关于 GitHub URL 的说明**：标准 `pip` 无法直接解析裸网页地址 `pip install https://github.com/owner/repo`（该地址返回 HTML 网页），因此请使用 `git+https://github.com/owner/repo` 或 `/archive/refs/heads/main.zip`（或 Release `.whl`）。
+>
+> **零配置双后端自适应**：
+> - 目标环境已安装 Rust (`cargo`) 时，`pip install` 会自动以 Release 模式编译原生多核扩展 `smart_splitter._core`（`PyO3` + `Rayon`）；
+> - 目标环境**未安装 Rust** 时，`setup.py` 会自动跳过 Rust 编译并**零报错完成安装**，使用算法全特性对齐的 OpenCV / NumPy 向量化内核；
+> - 推送版本标签（如 `git tag v0.2.0 && git push --tags`）后，`.github/workflows/release-wheels.yml` 会自动为 Linux / macOS / Windows 编译并发布免编译原生 `.whl` 包。
+
+### 命令行与 Python API 用法
+
 ```bash
-cd python_rust_splitter
-pip install maturin opencv-python-headless numpy pillow pytest
-
-# 编译 Rust Release 原生扩展模块
-maturin develop --release
-
 # 命令行批量切割
-smart-split input_sheet.png -o ./output_slices --mode auto --bleed-trim 2 --format png
-
-# 运行 Python 测试集
-pytest -v tests/
+smart-split examples/sample_slides.png -o ./output_slices --mode auto --bleed-trim 2 --format png
 ```
 
-Python API 调用示例（含零磁盘内存导出与 ML 模型钩子）：
 ```python
+import cv2
 from smart_splitter import SmartSplitter
 
 splitter = SmartSplitter(mode="auto", sensitivity=0.65, bleed_trim=2)
-result, paths = splitter.split_file("sheet.png", "output_slices/")
+
+# 1. 文件级直接切割保存
+result, paths = splitter.split_file("examples/sample_slides.png", "output_slices/")
 print(f"通过 {result.backend} 在 {result.elapsed_ms:.1f}ms 内输出 {len(paths)} 张切片")
 
-# 零磁盘内存导出（适用于 FastAPI 接口或 PyTorch 数据加载流水线）
-result, png_blobs = splitter.split_to_bytes(image_array, fmt="png")
+# 2. 零磁盘内存字节流输出（适用于 FastAPI / PyTorch 数据流水线）
+img = cv2.imread("examples/sample_slides.png")
+result, png_blobs = splitter.split_to_bytes(img, fmt="png")
+
+# 3. 可选机器学习分割回调（可接入 SAM 2 / YOLO / ONNX）
+ml_splitter = SmartSplitter(ml_segmenter=my_sam2_box_predictor)
+```
+
+### 本地开发与测试
+
+```bash
+pip install setuptools wheel setuptools-rust maturin pytest numpy opencv-python-headless pillow
+maturin develop --release
+pytest -v tests/
 ```
 
 ---
 
-## 6. 仓库目录结构
+## 5. 仓库目录结构
 
 ```text
 .
+├── Cargo.toml                        # Rust PyO3 + Rayon Crate 配置
+├── pyproject.toml                    # PEP 517 + setuptools / maturin 构建配置
+├── setup.py                          # 自适应 Rust 编译（无 cargo 时无感回退纯 Python）
+├── MANIFEST.in                       # 源码分发清单（仅包含 Python 与 Rust 核心源码）
+├── LICENSE / CONTRIBUTING.md
+├── README.md / README.zh-CN.md
 ├── .github/
-│   ├── workflows/ci.yml              # TypeScript/Web 与 Rust/PyO3/Python 双栈 CI
+│   ├── workflows/
+│   │   ├── ci.yml                    # 根目录 pip install + Cargo + maturin + pytest CI
+│   │   └── release-wheels.yml        # 多平台预编译 Python Wheel 自动发布流
 │   ├── ISSUE_TEMPLATE/bug_report.md
 │   └── pull_request_template.md
-├── .gitignore / .gitattributes / .editorconfig / LICENSE / CONTRIBUTING.md
-├── README.md                         # 英文详细文档（算法理论 + 工程实践）
-├── README.zh-CN.md                   # 简体中文详细文档（当前文件）
-├── server.ts                         # Express 服务端：原始像素内存缓存与并发 ZIP 导出
 ├── src/
-│   ├── utils/splitterCore.ts         # 核心引擎：XY-Cut + 同级传播 + 轮廓分割 + 去杂边
-│   ├── utils/splitterCore.test.ts    # 像素级单元测试套件（6/6 通过）
-│   └── components/                   # 交互式画布框选、1:1 边缘放大镜、源码包浏览器
-└── python_rust_splitter/             # 可独立下载的 Rust + Python 生产源码包
-    ├── Cargo.toml / pyproject.toml / .gitignore / LICENSE
-    ├── README.md / README.zh-CN.md
-    ├── src/lib.rs                    # PyO3 + Rayon 并行剖面、并查集轮廓提取与内存裁剪
-    ├── python/smart_splitter/        # Python 封装层、OpenCV 回退内核、ML 钩子与 CLI
-    └── tests/test_splitter.py
+│   └── lib.rs                        # 原生 Rust 引擎：XY-Cut BSP、并查集轮廓提取与内存并发裁剪
+├── python/
+│   └── smart_splitter/
+│       ├── __init__.py               # 对外导出 (SmartSplitter, SplitBox, SplitResult)
+│       ├── engine.py                 # Rust / 全特性对齐 OpenCV 双引擎与 ML 钩子
+│       └── cli.py                    # `smart-split` 命令行入口
+├── tests/
+│   └── test_splitter.py              # pytest 单元测试（XY-Cut、留白沟壑、去杂边、轮廓提取）
+└── examples/
+    └── sample_slides.png             # 2848x1600 九宫格真实测试样本图
 ```

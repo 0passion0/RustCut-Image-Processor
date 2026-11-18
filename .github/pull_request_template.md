@@ -7,7 +7,6 @@
 - [ ] Verified outer-edge pixel bleed decontamination / 已检查输出子图边缘无杂边串色
 
 ## Verification Checklist / 测试检查清单
-- [ ] `npm run lint` (`tsc --noEmit`)
-- [ ] `npx tsx --test src/utils/splitterCore.test.ts`
-- [ ] `npm run build`
-- [ ] `cd python_rust_splitter && maturin develop --release && pytest -v tests/`
+- [ ] `cargo check --all-targets`
+- [ ] `pip install --no-build-isolation . && pytest -v tests/`
+- [ ] `maturin develop --release && pytest -v tests/`
