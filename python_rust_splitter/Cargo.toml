@@ -1,0 +1,21 @@
+[package]
+name = "smart-image-splitter"
+version = "0.2.0"
+edition = "2021"
+description = "High-performance Rust core (PyO3 + Rayon + image) for multi-strategy image splitting and seam bleed removal"
+license = "Apache-2.0"
+
+[lib]
+name = "_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+numpy = "0.22"
+rayon = "1.10"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
