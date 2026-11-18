@@ -1,7 +1,7 @@
 include Cargo.toml
 include LICENSE
 include README.md
-include README.zh-CN.md
+include README.en.md
 include pyproject.toml
 include setup.py
 recursive-include src *.rs

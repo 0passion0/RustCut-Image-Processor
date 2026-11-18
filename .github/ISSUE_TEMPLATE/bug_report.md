@@ -5,7 +5,7 @@ labels: bug
 ---
 
 ## Environment / 运行环境
-- Backend (`Python + Rust PyO3` / `Python + OpenCV fallback`):
+- Package version & Backend (`v0.2.4`, `rust-rayon` / `ml-hook`):
 - Python version & OS / CPU cores:
 
 ## Input Image Characteristics / 输入图像特征

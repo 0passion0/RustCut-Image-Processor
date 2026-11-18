@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SliceCraft Test Studio · smart-image-splitter</title>
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a href="/" class="brand">SliceCraft Test Studio</a>
+
+      <nav class="preset-nav" aria-label="Test image presets">
+        <button type="button" class="nav-link is-active" data-preset="slides">3×3 错位幻灯片</button>
+        <button type="button" class="nav-link" data-preset="bento">Bento 非对称布局</button>
+        <button type="button" class="nav-link" data-preset="gutters">白边沟壑拼图</button>
+        <button type="button" class="nav-link" data-preset="contours">离散轮廓目标</button>
+      </nav>
+
+      <div class="topbar-actions">
+        <button type="button" id="downloadZipBtn" class="btn-primary">导出全部 (.zip)</button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <aside class="sidebar" aria-label="Segmentation parameters">
+        <section class="panel-group">
+          <div class="group-header">
+            <h2 class="group-title">输入图像</h2>
+            <span class="group-hint" id="sourceDimensions">--</span>
+          </div>
+          <label for="fileInput" id="dropZone" class="drop-zone">
+            <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" class="sr-only" />
+            <span class="drop-title">点击上传或拖拽图片</span>
+            <span class="drop-sub">支持 PNG / JPG / WebP 本地纯浏览器像素测试</span>
+          </label>
+        </section>
+
+        <section class="panel-group">
+          <div class="group-header">
+            <h2 class="group-title">检测策略 (mode)</h2>
+          </div>
+          <div class="segmented" role="group" aria-label="Detection mode">
+            <button type="button" class="seg-btn is-active" data-mode="auto">Auto</button>
+            <button type="button" class="seg-btn" data-mode="xycut">XY-Cut</button>
+            <button type="button" class="seg-btn" data-mode="contour">Contour</button>
+            <button type="button" class="seg-btn" data-mode="grid">Grid</button>
+          </div>
+        </section>
+
+        <section class="panel-group" id="algoSliders">
+          <div class="slider-row">
+            <div class="slider-head">
+              <label for="sensitivityInput">灵敏度 (sensitivity)</label>
+              <output id="sensitivityValue" class="mono-num">0.65</output>
+            </div>
+            <input type="range" id="sensitivityInput" min="0.10" max="1.00" step="0.05" value="0.65" />
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-head">
+              <label for="minRatioInput">最小区域占比 (min_region_ratio)</label>
+              <output id="minRatioValue" class="mono-num">0.08</output>
+            </div>
+            <input type="range" id="minRatioInput" min="0.03" max="0.35" step="0.01" value="0.08" />
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-head">
+              <label for="bleedTrimInput">接缝去杂边 (bleed_trim)</label>
+              <output id="bleedTrimValue" class="mono-num">2 px</output>
+            </div>
+            <input type="range" id="bleedTrimInput" min="0" max="8" step="1" value="2" />
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-head">
+              <label for="contourGapInput">轮廓闭运算间隙 (contour_gap_px)</label>
+              <output id="contourGapValue" class="mono-num">8 px</output>
+            </div>
+            <input type="range" id="contourGapInput" min="1" max="24" step="1" value="8" />
+          </div>
+        </section>
+
+        <section class="panel-group is-hidden" id="gridControls">
+          <div class="group-header">
+            <h2 class="group-title">均匀网格配置</h2>
+          </div>
+          <div class="grid-inputs">
+            <label class="field-box">
+              <span>行数 (rows)</span>
+              <input type="number" id="rowsInput" min="1" max="16" value="3" />
+            </label>
+            <label class="field-box">
+              <span>列数 (cols)</span>
+              <input type="number" id="colsInput" min="1" max="16" value="3" />
+            </label>
+            <label class="field-box">
+              <span>间隙 (gutter_px)</span>
+              <input type="number" id="gutterInput" min="0" max="120" value="0" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel-group">
+          <div class="group-header">
+            <h2 class="group-title">统一输出长宽 (v0.2.4)</h2>
+          </div>
+          <label class="checkbox-row" for="uniformToggle">
+            <input type="checkbox" id="uniformToggle" />
+            <span>启用统一尺寸输出 (uniform_size)</span>
+          </label>
+
+          <div id="uniformOptions" class="uniform-options is-disabled">
+            <div class="segmented" role="group" aria-label="Uniform sizing mode">
+              <button type="button" class="seg-btn is-active" data-uniform="pad">Pad</button>
+              <button type="button" class="seg-btn" data-uniform="resize">Resize</button>
+              <button type="button" class="seg-btn" data-uniform="crop">Crop</button>
+            </div>
+            <div class="target-inputs">
+              <label class="field-box">
+                <span>目标宽 (可选)</span>
+                <input type="number" id="targetWInput" min="1" placeholder="自动最大" />
+              </label>
+              <label class="field-box">
+                <span>目标高 (可选)</span>
+                <input type="number" id="targetHInput" min="1" placeholder="自动最大" />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-group">
+          <div class="group-header">
+            <h2 class="group-title">Python 调用参数</h2>
+            <button type="button" id="copyCodeBtn" class="btn-inline">复制代码</button>
+          </div>
+          <pre id="pythonSnippet" class="code-preview"></pre>
+        </section>
+      </aside>
+
+      <main class="main-canvas-area">
+        <section class="stage-section">
+          <div class="section-bar">
+            <div class="section-meta">
+              <h1 class="section-title">原图分割边界预览</h1>
+              <span class="meta-line" id="analysisSummary">加载示例图像中...</span>
+            </div>
+            <div class="stage-tools">
+              <label class="checkbox-inline" for="overlayToggle">
+                <input type="checkbox" id="overlayToggle" checked />
+                <span>显示切割框</span>
+              </label>
+              <select id="formatSelect" class="format-select" aria-label="Export image format">
+                <option value="png">PNG 无损</option>
+                <option value="jpeg">JPG 高质量</option>
+                <option value="webp">WebP</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="canvas-frame">
+            <canvas id="previewCanvas" data-testid="preview-canvas"></canvas>
+          </div>
+        </section>
+
+        <section class="gallery-section">
+          <div class="section-bar">
+            <div class="section-meta">
+              <h2 class="section-title">切片结果列表</h2>
+              <span class="meta-line" id="gallerySummary">--</span>
+            </div>
+          </div>
+
+          <div id="slicesGrid" class="slices-grid" data-testid="slices-grid"></div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="lightboxDialog" class="lightbox" aria-labelledby="lightboxTitle">
+      <div class="lightbox-card">
+        <div class="lightbox-header">
+          <div>
+            <h3 id="lightboxTitle" class="lightbox-title">切片 1:1 边缘检验</h3>
+            <p id="lightboxMeta" class="meta-line"></p>
+          </div>
+          <div class="lightbox-actions">
+            <label class="checkbox-inline" for="zoomToggle">
+              <input type="checkbox" id="zoomToggle" />
+              <span>2× 像素放大</span>
+            </label>
+            <button type="button" id="lightboxDownloadBtn" class="btn-secondary">保存单图</button>
+            <button type="button" id="closeLightboxBtn" class="btn-secondary" aria-label="Close preview">关闭预览</button>
+          </div>
+        </div>
+        <div class="lightbox-stage">
+          <canvas id="lightboxCanvas"></canvas>
+        </div>
+      </div>
+    </dialog>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

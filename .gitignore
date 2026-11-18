@@ -29,6 +29,10 @@ pip-wheel-metadata/
 output_slices/
 *.zip
 
+# AI Studio container runner files (kept out of pure Rust+Python git repo)
+package.json
+bun.lock
+
 # OS & Editors
 .DS_Store
 Thumbs.db

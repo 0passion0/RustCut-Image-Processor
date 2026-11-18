@@ -11,13 +11,13 @@ Thank you for contributing to **smart-image-splitter**! Both algorithm improveme
 
 ### 1. Development Environment Setup
 - Rust stable (`rustup`), Python >= 3.9
-- `pip install setuptools wheel setuptools-rust maturin pytest opencv-python-headless numpy pillow`
+- `pip install setuptools wheel setuptools-rust maturin pytest numpy pillow`
 - Compile release Rust extension: `maturin develop --release` (or `pip install --no-build-isolation .`)
-- Run unit tests: `pytest -v tests/`
+- Run unit tests & lints: `pytest -v tests/` and `cargo clippy --all-targets -- -D warnings`
 
-### 2. Algorithm Parity Rule
-To ensure identical output whether the Rust PyO3 core is compiled or the vectorized OpenCV/NumPy fallback is used:
-- Any change to seam scoring weights, threshold formulas, sibling propagation tolerances, contour refinement, or bleed decontamination **must stay synchronized between `src/lib.rs` and `python/smart_splitter/engine.py`** and be covered by unit tests in `tests/test_splitter.py`.
+### 2. Core Implementation Rule
+- Detection (`detect_auto_rs`), uniform dimension alignment (`pad` / `resize` / `crop`), and parallel image encoding (`batch_crop_and_save_rs`, `batch_crop_to_memory_rs`) all live inside `src/lib.rs`, with Python bindings exposed through `python/smart_splitter/engine.py`.
+- Any algorithm or parameter change should include corresponding pixel-level assertions in `tests/test_splitter.py`.
 
 ### 3. Git Commit & Branch Conventions
 - Branch prefixes: `feat/...`, `fix/...`, `perf/...`, `docs/...`, `refactor/...`
@@ -36,13 +36,13 @@ To ensure identical output whether the Rust PyO3 core is compiled or the vectori
 
 ### 1. 本地开发环境配置
 - Rust stable (`rustup`)、Python >= 3.9
-- `pip install setuptools wheel setuptools-rust maturin pytest opencv-python-headless numpy pillow`
+- `pip install setuptools wheel setuptools-rust maturin pytest numpy pillow`
 - 编译 Release 原生 Rust 扩展：`maturin develop --release`（或 `pip install --no-build-isolation .`）
-- 运行单元测试：`pytest -v tests/`
+- 运行单元测试与静态检查：`pytest -v tests/` 及 `cargo clippy --all-targets -- -D warnings`
 
-### 2. 双后端算法一致性规范
-为保证编译 Rust PyO3 扩展与纯 Python/OpenCV 回退内核在任何环境下效果完全一致：
-- 任何对缝隙评分权重、阈值公式、同级网格线传播容差、轮廓 1:1 边缘收紧或防串色修边逻辑的修改，**须同步更新 `src/lib.rs` 与 `python/smart_splitter/engine.py`**，并在 `tests/test_splitter.py` 中补充对应像素级断言测试。
+### 2. 核心实现规范
+- 全部检测算法（`detect_auto_rs`）、统一长宽规范化（`pad` / `resize` / `crop`）与并发裁剪编码（`batch_crop_and_save_rs`、`batch_crop_to_memory_rs`）均由 `src/lib.rs` 实现，并通过 `python/smart_splitter/engine.py` 暴露接口。
+- 任何算法或参数改动须在 `tests/test_splitter.py` 中补充对应的像素级断言测试。
 
 ### 3. Git 分支与提交规范
 - 分支命名：`feat/...`、`fix/...`、`perf/...`、`docs/...`、`refactor/...`
