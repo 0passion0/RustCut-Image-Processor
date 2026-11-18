@@ -33,7 +33,7 @@ def main() -> None:
         else [args.input]
     )
 
-    print(f"SmartSplitter v0.2.0 | Rust PyO3 Core: {'ACTIVE' if HAS_RUST_CORE else 'OpenCV Fallback'}")
+    print(f"SmartSplitter v0.2.1 | Rust PyO3 Core: {'ACTIVE' if HAS_RUST_CORE else 'OpenCV Fallback'}")
     for img_path in inputs:
         sub_out = args.output / img_path.stem if args.input.is_dir() else args.output
         result, saved = splitter.split_file(

@@ -18,8 +18,9 @@
    - [2.5 单面板 ±8px 局部边缘吸附与抗锯齿去杂边](#25-单面板-8px-局部边缘吸附与抗锯齿去杂边)
    - [2.6 线性时间可分离膨胀 + Union-Find 轮廓提取与 1:1 边缘收紧](#26-线性时间可分离膨胀--union-find-轮廓提取与-11-边缘收紧)
 3. [工程落地实践与极限性能优化](#3-工程落地实践与极限性能优化)
-4. [快速开始（直接从 GitHub `pip install`）](#4-快速开始直接从-github-pip-install)
+4. [快速开始（支持 PyPI 或 GitHub `pip install`）](#4-快速开始支持-pypi-或-github-pip-install)
 5. [仓库目录结构](#5-仓库目录结构)
+6. [开源协议](#6-开源协议)
 
 ---
 
@@ -118,19 +119,22 @@ BSP 划分出独立子区域后，执行两步精修：
 
 ---
 
-## 4. 快速开始（直接从 GitHub `pip install`）
+## 4. 快速开始（支持 PyPI 或 GitHub `pip install`）
 
 ### 一行命令安装（无需其他操作）
 
 ```bash
-# 方式 1：通过 Git + pip 直接从 GitHub 安装（推荐）
-pip install git+https://github.com/<owner>/<repo>.git
+# 方式 1：直接从 PyPI 安装（推荐）
+pip install smart-image-splitter
 
-# 方式 2：通过 GitHub 源码压缩包 URL 安装（目标机器无需安装 git 客户端）
-pip install https://github.com/<owner>/<repo>/archive/refs/heads/main.zip
+# 方式 2：通过 Git + pip 直接从 GitHub 安装
+pip install git+https://github.com/0passion0/RustCut-Image-Processor.git
 
-# 方式 3：安装 GitHub Releases 预编译二进制 Wheel（免编译直出原生 Rust 加速版）
-pip install https://github.com/<owner>/<repo>/releases/latest/download/smart_image_splitter-0.2.0-cp311-cp311-manylinux_2_17_x86_64.whl
+# 方式 3：通过 GitHub 源码压缩包 URL 安装（目标机器无需安装 git 客户端）
+pip install https://github.com/0passion0/RustCut-Image-Processor/archive/refs/heads/main.zip
+
+# 方式 4：安装 GitHub Releases 预编译二进制 Wheel（免编译直出原生 Rust 加速版）
+pip install https://github.com/0passion0/RustCut-Image-Processor/releases/latest/download/smart_image_splitter-0.2.1-cp311-cp311-manylinux_2_17_x86_64.whl
 ```
 
 > **关于 GitHub URL 的说明**：标准 `pip` 无法直接解析裸网页地址 `pip install https://github.com/owner/repo`（该地址返回 HTML 网页），因此请使用 `git+https://github.com/owner/repo` 或 `/archive/refs/heads/main.zip`（或 Release `.whl`）。
@@ -138,7 +142,7 @@ pip install https://github.com/<owner>/<repo>/releases/latest/download/smart_ima
 > **零配置双后端自适应**：
 > - 目标环境已安装 Rust (`cargo`) 时，`pip install` 会自动以 Release 模式编译原生多核扩展 `smart_splitter._core`（`PyO3` + `Rayon`）；
 > - 目标环境**未安装 Rust** 时，`setup.py` 会自动跳过 Rust 编译并**零报错完成安装**，使用算法全特性对齐的 OpenCV / NumPy 向量化内核；
-> - 推送版本标签（如 `git tag v0.2.0 && git push --tags`）后，`.github/workflows/release-wheels.yml` 会自动为 Linux / macOS / Windows 编译并发布免编译原生 `.whl` 包。
+> - 推送版本标签（如 `git tag v0.2.1 && git push --tags`）后，`.github/workflows/release-wheels.yml` 会自动为 Linux / macOS / Windows 编译并发布免编译原生 `.whl` 包。
 
 ### 命令行与 Python API 用法
 
@@ -203,3 +207,9 @@ pytest -v tests/
 └── examples/
     └── sample_slides.png             # 2848x1600 九宫格真实测试样本图
 ```
+
+---
+
+## 6. 开源协议
+
+本项目采用 [Apache-2.0 OR MIT](LICENSE) 双重协议开源。

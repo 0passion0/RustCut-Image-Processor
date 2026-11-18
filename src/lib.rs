@@ -1,3 +1,5 @@
+#![allow(clippy::useless_conversion, clippy::too_many_arguments)]
+
 use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
 use numpy::PyReadonlyArray3;
 use pyo3::exceptions::PyValueError;
@@ -116,7 +118,8 @@ fn estimate_border_bg(buf: &[u8], w: u32, h: u32, ch: usize) -> ([u8; 4], bool, 
         return ([0, 0, 0, 0], true, transparent as f32 / n as f32);
     }
 
-    let mut bins: HashMap<(u8, u8, u8), (usize, u64, u64, u64)> = HashMap::new();
+    type ColorBin = (usize, u64, u64, u64);
+    let mut bins: HashMap<(u8, u8, u8), ColorBin> = HashMap::new();
     for s in &samples {
         let key = (s[0] >> 3, s[1] >> 3, s[2] >> 3);
         let entry = bins.entry(key).or_insert((0, 0, 0, 0));
@@ -148,12 +151,12 @@ fn collapse_gutter_runs(mut cands: Vec<SeamCandidate>) -> Vec<SeamCandidate> {
         }
         let mid = (i + j) / 2;
         let max_s = cands[i..=j].iter().map(|c| c.score).fold(0.0f32, f32::max);
-        for k in i..=j {
+        for (k, cand) in cands.iter_mut().enumerate().take(j + 1).skip(i) {
             if k == mid {
-                cands[k].score = max_s;
+                cand.score = max_s;
             } else {
-                cands[k].score = 0.0;
-                cands[k].is_gutter = false;
+                cand.score = 0.0;
+                cand.is_gutter = false;
             }
         }
         i = j + 1;
@@ -182,7 +185,7 @@ fn profile_horizontal_seams(
 
     let stride = (w as usize) * ch;
     let step_x = (span_w / 200).max(1);
-    let sample_count = ((span_w + step_x - 1) / step_x) as usize;
+    let sample_count = span_w.div_ceil(step_x) as usize;
 
     // Parallel scan per row producing scalar stats + compact thresholded bitflags (1 byte instead of 4B f32)
     let row_stats: Vec<(f32, f32, f32, f32, Vec<u8>)> = (0..span_h)
@@ -243,14 +246,8 @@ fn profile_horizontal_seams(
             let hi = (ry + 2).min(span_h - 2);
             let mut active = 0usize;
             for ui in 0..sample_count {
-                let mut hit = 0u8;
-                for r in lo..=hi {
-                    hit |= row_stats[r].4[ui];
-                    if hit != 0 {
-                        break;
-                    }
-                }
-                active += hit as usize;
+                let hit = row_stats[lo..=hi].iter().any(|row| row.4[ui] != 0);
+                active += usize::from(hit);
             }
             let cov = active as f32 / sample_count.max(1) as f32;
             let min_smooth = row_stats[ry.saturating_sub(1).max(1)]
@@ -1129,24 +1126,22 @@ fn contours_core(
     is_trans: bool,
 ) -> Vec<SplitBox> {
     let stride = (w as usize) * ch;
-    let scale = ((w.max(h) + 719) / 720).max(1);
-    let sw = ((w + scale - 1) / scale) as usize;
-    let sh = ((h + scale - 1) / scale) as usize;
+    let scale = w.max(h).div_ceil(720).max(1);
+    let sw = w.div_ceil(scale) as usize;
+    let sh = h.div_ceil(scale) as usize;
     let color_thresh = (32.0 - sensitivity.clamp(0.1, 1.0) * 18.0) as i32;
 
     // Parallel downsampled foreground mask
     let mut mask = vec![0u8; sw * sh];
     mask.par_chunks_mut(sw).enumerate().for_each(|(sy, row)| {
         let y = ((sy as u32) * scale).min(h - 1);
-        for sx in 0..sw {
+        for (sx, cell) in row.iter_mut().enumerate().take(sw) {
             let x = ((sx as u32) * scale).min(w - 1);
             let p = pixel_at(slice, stride, ch, x, y);
-            row[sx] = if is_trans {
-                if ch >= 4 && p[3] > 24 { 1 } else { 0 }
-            } else if color_dist(p, bg_rgb) > color_thresh {
-                1
+            *cell = if is_trans {
+                u8::from(ch >= 4 && p[3] > 24)
             } else {
-                0
+                u8::from(color_dist(p, bg_rgb) > color_thresh)
             };
         }
     });
@@ -1238,14 +1233,14 @@ fn contours_core(
                 labels[idx] = lbl;
             } else {
                 let mut best = nbrs[0];
-                for k in 1..nc {
-                    if nbrs[k] < best {
-                        best = nbrs[k];
+                for &nbr in &nbrs[1..nc] {
+                    if nbr < best {
+                        best = nbr;
                     }
                 }
                 labels[idx] = best;
-                for k in 0..nc {
-                    dsu_union(&mut parent, best, nbrs[k]);
+                for &nbr in &nbrs[..nc] {
+                    dsu_union(&mut parent, best, nbr);
                 }
             }
         }
@@ -1434,7 +1429,7 @@ fn borrow_image_bytes<'a>(image: &'a PyReadonlyArray3<'_, u8>) -> PyResult<(u32,
     let h = shape[0] as u32;
     let w = shape[1] as u32;
     let ch = shape[2];
-    let buf: Cow<'a, [u8]> = if let Some(s) = view.as_slice() {
+    let buf: Cow<'a, [u8]> = if let Some(s) = view.to_slice() {
         Cow::Borrowed(s)
     } else {
         Cow::Owned(view.iter().copied().collect())

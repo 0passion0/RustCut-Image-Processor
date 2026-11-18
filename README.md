@@ -18,8 +18,9 @@ It is engineered for real-world composite images where naive `W / N × H / M` gr
    - [2.5 Per-Cell Discontinuity Snap & Bleed Decontamination](#25-per-cell-discontinuity-snap--bleed-decontamination)
    - [2.6 Separable O(N) DSU Contour Segmentation & 1:1 Tight Edge Refinement](#26-separable-on-dsu-contour-segmentation--11-tight-edge-refinement)
 3. [Engineering Practice & Extreme Performance Optimization](#3-engineering-practice--extreme-performance-optimization)
-4. [Quick Start (`pip install` Directly from GitHub)](#4-quick-start-pip-install-directly-from-github)
+4. [Quick Start (`pip install` from PyPI or GitHub)](#4-quick-start-pip-install-from-pypi-or-github)
 5. [Repository Structure](#5-repository-structure)
+6. [License](#6-license)
 
 ---
 
@@ -124,19 +125,22 @@ When an image consists of scattered objects, UI stickers, or transparent RGBA sp
 
 ---
 
-## 4. Quick Start (`pip install` Directly from GitHub)
+## 4. Quick Start (`pip install` from PyPI or GitHub)
 
 ### Installation (Zero Extra Setup)
 
 ```bash
-# Option 1: Install directly via Git + pip (recommended)
-pip install git+https://github.com/<owner>/<repo>.git
+# Option 1: Install from PyPI (recommended)
+pip install smart-image-splitter
 
-# Option 2: Install via GitHub source archive URL (works even without git CLI installed)
-pip install https://github.com/<owner>/<repo>/archive/refs/heads/main.zip
+# Option 2: Install directly via Git + pip
+pip install git+https://github.com/0passion0/RustCut-Image-Processor.git
 
-# Option 3: Install a prebuilt binary wheel from GitHub Releases (precompiled Rust PyO3, no compiler needed)
-pip install https://github.com/<owner>/<repo>/releases/latest/download/smart_image_splitter-0.2.0-cp311-cp311-manylinux_2_17_x86_64.whl
+# Option 3: Install via GitHub source archive URL (works even without git CLI installed)
+pip install https://github.com/0passion0/RustCut-Image-Processor/archive/refs/heads/main.zip
+
+# Option 4: Install a prebuilt binary wheel from GitHub Releases (precompiled Rust PyO3, no compiler needed)
+pip install https://github.com/0passion0/RustCut-Image-Processor/releases/latest/download/smart_image_splitter-0.2.1-cp311-cp311-manylinux_2_17_x86_64.whl
 ```
 
 > **Note on GitHub URLs & `pip`**: Standard `pip` cannot install a bare GitHub webpage URL (`pip install https://github.com/owner/repo`) because GitHub serves HTML there. Always use `git+https://github.com/owner/repo` or `/archive/refs/heads/main.zip` (or a Release `.whl`).
@@ -144,7 +148,7 @@ pip install https://github.com/<owner>/<repo>/releases/latest/download/smart_ima
 > **Automatic Rust / OpenCV Dual-Backend**:
 > - If `cargo` (Rust toolchain) is installed on the target machine, `pip install` automatically compiles `smart_splitter._core` (`PyO3` + `Rayon`) in release mode.
 > - If `cargo` is **not** installed, `setup.py` skips Rust compilation gracefully with **zero errors** and uses the full-parity vectorized OpenCV / NumPy backend.
-> - Pushing a version tag (`git tag v0.2.0 && git push --tags`) triggers `.github/workflows/release-wheels.yml` (`PyO3/maturin-action`) to publish prebuilt native Rust wheels for Linux, macOS, and Windows.
+> - Pushing a version tag (`git tag v0.2.1 && git push --tags`) triggers `.github/workflows/release-wheels.yml` (`PyO3/maturin-action`) to publish prebuilt native Rust wheels for Linux, macOS, and Windows.
 
 ### CLI & Python API Usage
 
@@ -209,3 +213,9 @@ pytest -v tests/
 └── examples/
     └── sample_slides.png             # Real-world 2848x1600 3x3 slide benchmark image
 ```
+
+---
+
+## 6. License
+
+Dual-licensed under [Apache-2.0 OR MIT](LICENSE).

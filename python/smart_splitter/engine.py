@@ -3,6 +3,7 @@ SmartSplitter: Hybrid Rust (PyO3 + Rayon) + OpenCV + Optional ML Segmentation En
 """
 from __future__ import annotations
 
+import importlib.util
 import os
 import time
 from dataclasses import dataclass, field
@@ -12,10 +13,10 @@ from typing import Callable, List, Literal, Optional, Tuple
 import cv2
 import numpy as np
 
-try:
+if importlib.util.find_spec(f"{__package__}._core") is not None:
     from . import _core as _rust_core
     HAS_RUST_CORE = True
-except ImportError:
+else:
     _rust_core = None
     HAS_RUST_CORE = False
 
