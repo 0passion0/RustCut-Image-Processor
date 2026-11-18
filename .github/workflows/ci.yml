@@ -1,0 +1,45 @@
+name: SliceCraft CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  web-and-ts-core:
+    name: Web Studio & TypeScript Core Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsx --test src/utils/splitterCore.test.ts
+      - run: npm run build
+
+  rust-python-engine:
+    name: Rust PyO3 + Python Engine Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Python build & test dependencies
+        working-directory: python_rust_splitter
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin pytest numpy opencv-python-headless pillow
+      - name: Check Rust crate & compile PyO3 release extension
+        working-directory: python_rust_splitter
+        run: |
+          cargo check --all-targets
+          maturin develop --release
+      - name: Run Python + Rust parity tests
+        working-directory: python_rust_splitter
+        run: pytest -v tests/
